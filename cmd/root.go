@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -332,13 +331,12 @@ func handleModels(a *agent.Agent, cfg *config.Config) {
 		tag := modelTag(m.Size, ram)
 		fmt.Fprintf(os.Stderr, "  %d) %-34s %-8s  %s\n", i+1, m.Name, formatSize(m.Size), tag)
 	}
-	fmt.Fprintf(os.Stderr, "Select [1-%d] (Enter to cancel): ", len(models))
-
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
+	// Use a.ReadLine so liner's raw-mode terminal is handled correctly.
+	choice, err := a.ReadLine(fmt.Sprintf("Select [1-%d] (Enter to cancel): ", len(models)))
+	if err != nil {
 		return
 	}
-	choice := strings.TrimSpace(scanner.Text())
+	choice = strings.TrimSpace(choice)
 	if choice == "" {
 		return
 	}
