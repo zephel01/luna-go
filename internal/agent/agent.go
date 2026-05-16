@@ -1,15 +1,16 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/peterh/liner"
 	"github.com/zephel01/luna-go/internal/llm"
 	"github.com/zephel01/luna-go/internal/tools"
 )
@@ -41,6 +42,7 @@ type Options struct {
 	MaxIter      int
 	Stream       bool
 	ExtraContext  string // content injected into system prompt (from .luna-context.md)
+	SkillsBlock  string // XML block listing available skills (from skills.Load)
 	SessionLog   string // path to write session JSONL (empty = disabled)
 	// OnSlashCmd is called when the user types a /command in REPL.
 	// Return true to continue the REPL, false to exit.
@@ -57,6 +59,13 @@ type Agent struct {
 	stream     bool
 	sessionLog string
 	onSlashCmd func(a *Agent, cmd string) bool
+	completer  func(string) []string // tab-completion candidates for REPL
+}
+
+// SetCompleter registers a tab-completion function for the REPL.
+// fn receives the current line prefix and returns matching candidates.
+func (a *Agent) SetCompleter(fn func(string) []string) {
+	a.completer = fn
 }
 
 // SetClient swaps the LLM client (e.g. after a /models switch).
@@ -83,6 +92,11 @@ func New(client llm.Client, registry *tools.Registry, opts Options) *Agent {
 	sys := fmt.Sprintf(systemPromptTpl, cwd)
 	if opts.ExtraContext != "" {
 		sys += "\n\n## Project Context\n" + opts.ExtraContext
+	}
+	if opts.SkillsBlock != "" {
+		sys += "\n\n## Available Skills\n" +
+			"When a task matches a skill, use the read tool to load the full SKILL.md at its path, then follow the instructions.\n" +
+			opts.SkillsBlock
 	}
 
 	return &Agent{
@@ -230,20 +244,34 @@ func (a *Agent) executeTool(ctx context.Context, tc llm.ToolCall) string {
 	return result
 }
 
-// REPL runs an interactive read-eval-print loop.
+// REPL runs an interactive read-eval-print loop with tab completion and history.
 func (a *Agent) REPL(ctx context.Context) {
 	defer a.saveHistory()
-	fmt.Fprintln(os.Stderr, "Luna v0.3  —  type your request, Ctrl-C or 'exit' to quit")
-	scanner := bufio.NewScanner(os.Stdin)
+
+	rl := liner.NewLiner()
+	defer rl.Close()
+	rl.SetCtrlCAborts(true) // Ctrl-C returns ErrPromptAborted instead of killing process
+
+	if a.completer != nil {
+		rl.SetCompleter(a.completer)
+	}
+
+	fmt.Fprintln(os.Stderr, "Luna v0.3  —  type your request, Tab to complete, Ctrl-C or 'exit' to quit")
+
 	for {
-		fmt.Fprint(os.Stderr, "\n> ")
-		if !scanner.Scan() {
+		input, err := rl.Prompt("\n> ")
+		if err == liner.ErrPromptAborted || err == io.EOF {
 			break
 		}
-		input := strings.TrimSpace(scanner.Text())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "input error: %v\n", err)
+			break
+		}
+		input = strings.TrimSpace(input)
 		if input == "" {
 			continue
 		}
+		rl.AppendHistory(input) // ↑↓ key history
 		if input == "exit" || input == "quit" {
 			break
 		}
@@ -254,6 +282,8 @@ func (a *Agent) REPL(ctx context.Context) {
 				fmt.Fprintln(os.Stderr, "  /models          — list and switch Ollama models (with RAM recommendation)")
 				fmt.Fprintln(os.Stderr, "  /dream           — consolidate session buffer into context.md via Ollama")
 				fmt.Fprintln(os.Stderr, "  /memory [show|status|clear] — inspect or clear memory")
+				fmt.Fprintln(os.Stderr, "  /skills          — list available skills")
+				fmt.Fprintln(os.Stderr, "  /skill:<name>    — load and execute a skill (Agent Skills standard)")
 				fmt.Fprintln(os.Stderr, "  /help            — show this message")
 				fmt.Fprintln(os.Stderr, "  exit             — quit REPL")
 				continue

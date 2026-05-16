@@ -32,6 +32,7 @@ go.work.sum
 
 # Private / internal docs (non-public)
 docs/inside/
+docs/articles/
 
 # Working outputs (CLAUDE.md convention)
 _OUTPUTS/

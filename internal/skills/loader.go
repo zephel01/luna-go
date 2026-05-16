@@ -1,0 +1,192 @@
+// Package skills implements the Agent Skills standard for luna-go.
+// Compatible with Claude Code (~/.claude/skills/), Cowork, and Pi skill formats.
+// Spec: https://earendil-works.github.io/agent-skills/
+package skills
+
+import (
+	"bufio"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// Skill represents a parsed skill from a SKILL.md file.
+type Skill struct {
+	Name        string // from frontmatter name:
+	Description string // from frontmatter description:
+	Path        string // absolute path to SKILL.md
+}
+
+// Load discovers all skills from standard locations and returns them.
+// Name collisions are resolved by keeping the first skill found (project > global).
+func Load() []Skill {
+	var result []Skill
+	seen := map[string]bool{}
+
+	for _, dir := range searchDirs() {
+		for _, s := range scanDir(dir) {
+			if !seen[s.Name] {
+				seen[s.Name] = true
+				result = append(result, s)
+			}
+		}
+	}
+	return result
+}
+
+// Find returns the skill with the given name, or false if not found.
+func Find(skills []Skill, name string) (Skill, bool) {
+	for _, s := range skills {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return Skill{}, false
+}
+
+// SystemPromptBlock returns an XML block listing skill names and descriptions
+// for injection into the system prompt (progressive disclosure — full content
+// is loaded on-demand via the read tool or /skill:name).
+func SystemPromptBlock(skills []Skill) string {
+	if len(skills) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("<skills>\n")
+	for _, s := range skills {
+		sb.WriteString("  <skill>\n")
+		sb.WriteString("    <name>" + s.Name + "</name>\n")
+		sb.WriteString("    <description>" + s.Description + "</description>\n")
+		sb.WriteString("    <path>" + s.Path + "</path>\n")
+		sb.WriteString("  </skill>\n")
+	}
+	sb.WriteString("</skills>")
+	return sb.String()
+}
+
+// searchDirs returns skill directories in priority order (project-local first).
+func searchDirs() []string {
+	var dirs []string
+
+	// Project-level: walk up from cwd to git root, collect .agents/skills/
+	dirs = append(dirs, projectSkillDirs()...)
+
+	// Global directories
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return dirs
+	}
+	dirs = append(dirs,
+		filepath.Join(home, ".agents", "skills"),          // Agent Skills standard
+		filepath.Join(home, ".claude", "skills"),           // Claude Code / Cowork
+		filepath.Join(home, ".pi", "agent", "skills"),      // Pi compatible
+		filepath.Join(home, ".luna-go", "skills"),           // luna-go specific
+	)
+	return dirs
+}
+
+// projectSkillDirs walks up from cwd to the git root and collects .agents/skills/ paths.
+func projectSkillDirs() []string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	gitRoot := findGitRoot(cwd)
+
+	var dirs []string
+	dir := cwd
+	for {
+		dirs = append(dirs, filepath.Join(dir, ".agents", "skills"))
+		if dir == gitRoot || dir == filepath.Dir(dir) {
+			break
+		}
+		dir = filepath.Dir(dir)
+	}
+	return dirs
+}
+
+// findGitRoot walks up from dir until it finds a .git directory.
+func findGitRoot(dir string) string {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return dir
+		}
+		dir = parent
+	}
+}
+
+// scanDir looks for skills in dir:
+//   - Subdirectories containing SKILL.md
+//   - Root .md files with valid frontmatter (for ~/.pi/agent/skills/ style)
+func scanDir(dir string) []Skill {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	var skills []Skill
+	for _, e := range entries {
+		if e.IsDir() {
+			// Directory: look for SKILL.md inside
+			if s, ok := parseSkillFile(filepath.Join(dir, e.Name(), "SKILL.md")); ok {
+				skills = append(skills, s)
+			}
+		} else if strings.HasSuffix(e.Name(), ".md") {
+			// Root .md file: treat as skill if it has valid frontmatter
+			if s, ok := parseSkillFile(filepath.Join(dir, e.Name())); ok {
+				skills = append(skills, s)
+			}
+		}
+	}
+	return skills
+}
+
+// parseSkillFile reads a SKILL.md and extracts name + description from frontmatter.
+func parseSkillFile(path string) (Skill, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Skill{}, false
+	}
+	name, desc := parseFrontmatter(string(data))
+	if name == "" || desc == "" {
+		return Skill{}, false
+	}
+	return Skill{Name: name, Description: desc, Path: path}, true
+}
+
+// parseFrontmatter extracts name and description from YAML frontmatter.
+//
+//	---
+//	name: skill-name
+//	description: What this skill does.
+//	---
+func parseFrontmatter(content string) (name, description string) {
+	if !strings.HasPrefix(strings.TrimSpace(content), "---") {
+		return "", ""
+	}
+	// Skip opening ---
+	rest := content[strings.Index(content, "---")+3:]
+
+	// Find closing ---
+	end := strings.Index(rest, "\n---")
+	if end == -1 {
+		return "", ""
+	}
+	fm := rest[:end]
+
+	scanner := bufio.NewScanner(strings.NewReader(fm))
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "name:"):
+			name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+		case strings.HasPrefix(line, "description:"):
+			description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+		}
+	}
+	return name, description
+}

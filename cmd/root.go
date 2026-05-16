@@ -19,6 +19,7 @@ import (
 	"github.com/zephel01/luna-go/internal/config"
 	"github.com/zephel01/luna-go/internal/llm"
 	"github.com/zephel01/luna-go/internal/memory"
+	"github.com/zephel01/luna-go/internal/skills"
 	"github.com/zephel01/luna-go/internal/tools"
 )
 
@@ -106,6 +107,17 @@ func Execute() {
 		extraContext = loadContextFile(store)
 	}
 
+	// Discover Agent Skills (compatible with Claude Code / Cowork / Pi).
+	loadedSkills := skills.Load()
+	if len(loadedSkills) > 0 {
+		fmt.Fprintf(os.Stderr, "🔧 loaded %d skill(s): ", len(loadedSkills))
+		names := make([]string, len(loadedSkills))
+		for i, s := range loadedSkills {
+			names[i] = s.Name
+		}
+		fmt.Fprintln(os.Stderr, strings.Join(names, ", "))
+	}
+
 	// Build LLM client (single OpenAI-compatible implementation for both Ollama and OpenAI).
 	var client llm.Client = llm.NewOpenAIClient(cfg.BaseURL, cfg.APIKey, cfg.Model, llm.ClientOptions{
 		NumCtx:     cfg.NumCtx,
@@ -125,8 +137,9 @@ func Execute() {
 		MaxIter:      cfg.MaxIter,
 		Stream:       cfg.Stream,
 		ExtraContext:  extraContext,
+		SkillsBlock:  skills.SystemPromptBlock(loadedSkills),
 		SessionLog:   sessionLogPath(),
-		OnSlashCmd:   makeSlashHandler(cfg),
+		OnSlashCmd:   makeSlashHandler(cfg, loadedSkills),
 	})
 
 	// Determine session ID for buffer capture.
@@ -143,6 +156,9 @@ func Execute() {
 		captureToBuffer(store, a.History(), sessionID)
 		return
 	}
+
+	// Register tab-completion candidates for the REPL.
+	a.SetCompleter(makeCompleter(loadedSkills))
 
 	// Interactive REPL mode.
 	a.REPL(context.Background())
@@ -201,8 +217,37 @@ func sessionLogPath() string {
 
 // --- Slash command handler ---
 
+// makeCompleter returns a tab-completion function for the REPL.
+// It covers all built-in slash commands and dynamically adds /skill:<name> entries.
+func makeCompleter(loadedSkills []skills.Skill) func(string) []string {
+	base := []string{
+		"/models",
+		"/dream",
+		"/memory", "/memory show", "/memory status", "/memory clear",
+		"/skills",
+		"/help",
+		"exit",
+	}
+	return func(line string) []string {
+		// Build candidate list: base + /skill:<name> per loaded skill
+		candidates := make([]string, len(base))
+		copy(candidates, base)
+		for _, s := range loadedSkills {
+			candidates = append(candidates, "/skill:"+s.Name)
+		}
+		// Filter by prefix
+		var matches []string
+		for _, c := range candidates {
+			if strings.HasPrefix(c, line) {
+				matches = append(matches, c)
+			}
+		}
+		return matches
+	}
+}
+
 // makeSlashHandler returns a handler for REPL slash commands.
-func makeSlashHandler(cfg *config.Config) func(a *agent.Agent, cmd string) bool {
+func makeSlashHandler(cfg *config.Config, loadedSkills []skills.Skill) func(a *agent.Agent, cmd string) bool {
 	return func(a *agent.Agent, cmd string) bool {
 		switch {
 		case cmd == "/models":
@@ -212,10 +257,56 @@ func makeSlashHandler(cfg *config.Config) func(a *agent.Agent, cmd string) bool 
 		case cmd == "/memory" || strings.HasPrefix(cmd, "/memory "):
 			sub := strings.TrimPrefix(strings.TrimPrefix(cmd, "/memory"), " ")
 			slashMemory(a, sub)
+		case cmd == "/skills":
+			handleSkillsList(loadedSkills)
+		case strings.HasPrefix(cmd, "/skill:"):
+			name := strings.TrimPrefix(cmd, "/skill:")
+			// Support "/skill:name extra args"
+			parts := strings.SplitN(name, " ", 2)
+			skillName := strings.TrimSpace(parts[0])
+			args := ""
+			if len(parts) > 1 {
+				args = strings.TrimSpace(parts[1])
+			}
+			handleSkillRun(a, loadedSkills, skillName, args)
 		default:
 			fmt.Fprintf(os.Stderr, "unknown command %q — type /help\n", cmd)
 		}
 		return true // always continue REPL
+	}
+}
+
+// handleSkillsList prints all available skills.
+func handleSkillsList(loadedSkills []skills.Skill) {
+	if len(loadedSkills) == 0 {
+		fmt.Fprintln(os.Stderr, "no skills found — place SKILL.md files in .agents/skills/ or ~/.claude/skills/")
+		return
+	}
+	fmt.Fprintln(os.Stderr, "\nAvailable skills:")
+	for _, s := range loadedSkills {
+		fmt.Fprintf(os.Stderr, "  /skill:%-24s %s\n", s.Name, s.Description)
+	}
+}
+
+// handleSkillRun loads the full SKILL.md and sends it to the agent as a user message.
+func handleSkillRun(a *agent.Agent, loadedSkills []skills.Skill, name, args string) {
+	s, ok := skills.Find(loadedSkills, name)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "skill %q not found — use /skills to list available skills\n", name)
+		return
+	}
+	data, err := os.ReadFile(s.Path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error reading skill: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "📦 loading skill: %s\n", s.Name)
+	prompt := "Load and follow the instructions in this skill:\n\n" + string(data)
+	if args != "" {
+		prompt += "\n\nUser: " + args
+	}
+	if err := a.Run(context.Background(), prompt); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 	}
 }
 
