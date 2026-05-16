@@ -41,6 +41,7 @@ type Options struct {
 	MaxIter      int
 	Stream       bool
 	ExtraContext  string // content injected into system prompt (from .luna-context.md)
+	SkillsBlock  string // XML block listing available skills (from skills.Load)
 	SessionLog   string // path to write session JSONL (empty = disabled)
 	// OnSlashCmd is called when the user types a /command in REPL.
 	// Return true to continue the REPL, false to exit.
@@ -83,6 +84,11 @@ func New(client llm.Client, registry *tools.Registry, opts Options) *Agent {
 	sys := fmt.Sprintf(systemPromptTpl, cwd)
 	if opts.ExtraContext != "" {
 		sys += "\n\n## Project Context\n" + opts.ExtraContext
+	}
+	if opts.SkillsBlock != "" {
+		sys += "\n\n## Available Skills\n" +
+			"When a task matches a skill, use the read tool to load the full SKILL.md at its path, then follow the instructions.\n" +
+			opts.SkillsBlock
 	}
 
 	return &Agent{
@@ -254,6 +260,8 @@ func (a *Agent) REPL(ctx context.Context) {
 				fmt.Fprintln(os.Stderr, "  /models          — list and switch Ollama models (with RAM recommendation)")
 				fmt.Fprintln(os.Stderr, "  /dream           — consolidate session buffer into context.md via Ollama")
 				fmt.Fprintln(os.Stderr, "  /memory [show|status|clear] — inspect or clear memory")
+				fmt.Fprintln(os.Stderr, "  /skills          — list available skills")
+				fmt.Fprintln(os.Stderr, "  /skill:<name>    — load and execute a skill (Agent Skills standard)")
 				fmt.Fprintln(os.Stderr, "  /help            — show this message")
 				fmt.Fprintln(os.Stderr, "  exit             — quit REPL")
 				continue
