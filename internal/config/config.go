@@ -25,6 +25,13 @@ type Config struct {
 	// LoopTimeoutMin is the wall-clock limit (minutes) for a single Run/loop call.
 	// 0 means "use default (30 min)". Set to -1 to disable entirely.
 	LoopTimeoutMin int `yaml:"loop_timeout_min"`
+	// CompressModel is the Ollama model used for context compression summarisation.
+	// Empty string means "use the same model as Model".
+	// Compression only fires when CompressThreshold > 0.
+	CompressModel string `yaml:"compress_model"`
+	// CompressThreshold is the estimated token count at which context compression
+	// triggers. 0 (default) = disabled. Set to e.g. 24000 to enable.
+	CompressThreshold int `yaml:"compress_threshold"`
 }
 
 func defaults() Config {
