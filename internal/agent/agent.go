@@ -69,6 +69,11 @@ func (a *Agent) SetCompleter(fn func(string) []string) {
 	a.completer = fn
 }
 
+// SetSlashHandler replaces the slash-command handler (used to wire closures after agent creation).
+func (a *Agent) SetSlashHandler(fn func(a *Agent, cmd string) bool) {
+	a.onSlashCmd = fn
+}
+
 // ReadLine reads a line using the active liner instance (REPL mode) or plain stdin.
 // Slash-command handlers should use this instead of bufio.Scanner so they work
 // correctly while liner holds the terminal in raw mode.
@@ -327,6 +332,7 @@ func (a *Agent) REPL(ctx context.Context) {
 				fmt.Fprintln(os.Stderr, "  /memory [show|status|clear] — inspect or clear memory")
 				fmt.Fprintln(os.Stderr, "  /skills          — list available skills")
 				fmt.Fprintln(os.Stderr, "  /skill:<name>    — load and execute a skill (Agent Skills standard)")
+				fmt.Fprintln(os.Stderr, "  /unsafe          — toggle auto-approve for bash/write (unsafe mode)")
 				fmt.Fprintln(os.Stderr, "  /help            — show this message")
 				fmt.Fprintln(os.Stderr, "  [[               — start multi-line input (end with ]])")
 				fmt.Fprintln(os.Stderr, "  exit             — quit REPL")
