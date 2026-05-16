@@ -15,14 +15,13 @@ English | [日本語](README.md)
 ---
 
 ```
-$ luna "read main.go and add unit tests for the Parse function"
+$ luna "read main.go and refactor the Parse function"
 
 ⚙  read({"path": "/project/main.go"})
-⚙  read({"path": "/project/parse.go"})
-⚙  write({"path": "/project/parse_test.go", "content": "..."})
+⚙  edit({"path": "/project/main.go", "old_string": "...", "new_string": "..."})
 ⚙  bash({"command": "go test ./..."})
 
-All tests pass.
+All tests pass. Refactored Parse to use a switch statement.
 ```
 
 ---
@@ -31,14 +30,18 @@ All tests pass.
 
 Most AI coding tools require a cloud subscription, an npm install, or a Python environment. Luna doesn't.
 
-|  | **luna-go** | Claude Code | Aider | Codex CLI |
-|--|:-----------:|:-----------:|:-----:|:---------:|
-| Distribution | **single binary** | npm | pip | binary |
-| Default backend | **Ollama (local)** | Anthropic API | Any | OpenAI |
-| Offline capable | ✅ | ❌ | ✅ | ❌ |
-| Tools | **4** | 30+ | git + edit | 10+ |
+|  | **luna-go** | Claude Code | Aider | Pi |
+|--|:-----------:|:-----------:|:-----:|:--:|
+| Distribution | **single binary** | npm | pip | TypeScript |
+| Default backend | **Ollama (local)** | Anthropic API | Any | Ollama |
+| Offline capable | ✅ | ❌ | ✅ | ✅ |
+| Tools | **5** | 30+ | git + edit | 4 |
+| Session memory | ✅ Dreaming-lite | ✅ | ❌ | ❌ |
+| REPL readline | ✅ liner | ✅ | ✅ | ❌ |
+| Autonomous loop | ✅ `/goal` | ✅ | ❌ | ❌ |
+| Agent Skills | ✅ | ✅ | ❌ | ❌ |
 
-> A smart enough model doesn't need 30 tools. Four is enough for 80% of real coding tasks.
+> A smart enough model doesn't need 30 tools. Five is enough.
 
 ---
 
@@ -75,9 +78,9 @@ cd luna-go && make build   # → ./luna
 ```
 
 > **Note:** Running `go build` without `-o` produces a `luna-go` binary (from the module name).
-> Always use `make build` or `go build -o luna .` instead.
+> Always use `make build` or `go build -o luna .`.
 
-Requires Go 1.22+. No other dependencies.
+Requires Go 1.22+. Two external dependencies: `gopkg.in/yaml.v3` + `github.com/peterh/liner`.
 
 ---
 
@@ -114,10 +117,12 @@ luna
 
 | Model | Size | Notes |
 |-------|------|-------|
-| `qwen3.5:9b` | 6.6 GB | **Recommended** — reliable tool calling, great balance |
-| `qwen3:32b` | 20 GB | Best quality for complex tasks |
-| `qwen2.5-coder:14b` | 9.0 GB | Strong for code-specific work |
-| `qwen2.5-coder:7b` | 4.7 GB | Minimum viable, works with fallback parsing |
+| `qwen3.5:35b-a3b` | 22 GB | **Best quality** — large RAM environments |
+| `qwen3.5:9b` | 5.8 GB | **Recommended** — reliable tool calling, great balance |
+| `qwen3.6:35b-a3b-coding-nvfp4` | 21.9 GB | Coding-specialized quantized variant |
+| `qwen2.5-coder:7b` | 4.7 GB | Minimal footprint (fallback parsing supported) |
+
+> Use `/models` in the REPL to see all installed models with RAM recommendations.
 
 ---
 
@@ -125,19 +130,40 @@ luna
 
 ```bash
 luna [flags] [prompt]
-
-# Omitting prompt launches REPL mode
+luna dream [--dry-run] [--model <model>]
+luna memory <show|status|clear|add <text>>
+luna config <show|init>
 ```
+
+### Flags
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--model` | LLM model | `qwen3.5:9b` |
+| `--model` | LLM model | `qwen2.5-coder:7b` |
 | `--provider` | `ollama` \| `openai` | `ollama` |
 | `--base-url` | API endpoint | `http://localhost:11434` |
 | `--api-key` | API key | `$OPENAI_API_KEY` |
 | `--max-iter` | Max tool iterations | `20` |
-| `--unsafe` | Skip bash confirmation | `false` |
+| `--unsafe` | Skip bash / write confirmation | `false` |
 | `--stream` | Enable streaming output | `false` |
+| `--no-context` | Skip loading `.luna-context.md` | `false` |
+
+### REPL Commands
+
+| Command | Description |
+|---------|-------------|
+| `/models` | List Ollama models with RAM recommendations; select to switch |
+| `/dream` | Summarize session buffer into `context.md` via Ollama |
+| `/memory [show\|status\|clear]` | Inspect or reset session memory |
+| `/skills` | List available Agent Skills |
+| `/skill:<name>` | Load and execute a skill |
+| `/unsafe` | Toggle auto-approve for bash / write mid-session |
+| `/goal <text>` | Set a session goal — Luna works autonomously until achieved |
+| `/goal` | Show current goal |
+| `/goal clear` | Clear goal |
+| `/help` | Show all commands |
+| `[[` | Start multi-line input (end with `]]`) |
+| `exit` | Quit REPL |
 
 **Using a cloud API:**
 
@@ -147,26 +173,98 @@ luna --provider openai --model gpt-4o "add error handling to all HTTP handlers"
 
 ---
 
-## What Luna Can (and Can't) Do
+## Project Context
 
-**✅ Works well**
-- Refactor functions, rename variables across files
-- Fix bugs from error messages
-- Add tests to existing modules
-- Generate README or inline docs from code
-- Edit config files (package.json, Dockerfile, tsconfig)
-- Parse logs and summarize findings
-- Implement new endpoints or utility functions
+Place a `.luna-context.md` file in your project root and Luna injects it into the system prompt at startup — no need to re-explain your project every session.
 
-**⚠️ Works, but takes more iterations**
-- Large-scale refactors spanning many files
-- Tasks requiring deep framework-specific knowledge
+```markdown
+# .luna-context.md
+Go 1.24 project. Packages: cmd/, internal/llm/, internal/tools/, internal/agent/
+Tests: go test ./...   Build: go build -o luna .
+Keep dependencies minimal.
+```
 
-**❌ Out of scope (by design)**
-- Interactive debugging (breakpoints, step execution)
-- Long-term memory across sessions
-- IDE integration
-- Parallel task execution
+---
+
+## Dreaming-lite (Session Memory)
+
+Luna automatically captures session conversations to a buffer. Run `luna dream` to let a local Ollama model distill the buffer into `context.md`, which is injected on next startup.
+
+```
+# After a session
+$ luna dream
+🌙 dreaming over 5 buffer entries with qwen3.5:9b ...
+✅ context.md updated (5 entries processed, buffer cleared)
+
+# Next day
+$ luna
+🧠 loaded memory/context.md (luna-go)   ← picks up where you left off
+>
+```
+
+---
+
+## Autonomous Mode (`/goal`)
+
+Set a session-level goal and Luna keeps working until it declares the goal achieved — looping through tool calls without returning to the REPL.
+
+```
+> /unsafe
+> /goal make all tests pass in internal/tools/
+
+⚙  bash({"command":"go test ./internal/tools/..."})
+--- FAIL: TestReadTool ...
+
+⚙  read({"path":"internal/tools/read_test.go"})
+⚙  edit({"path":"...", ...})
+⚙  bash({"command":"go test ./internal/tools/..."})
+ok  github.com/zephel01/luna-go/internal/tools
+
+ゴール達成: All tests pass. Fixed boundary condition in TestReadTool...
+
+>
+```
+
+A 30-minute wall-clock timeout applies by default (configurable via `loop_timeout_min`).
+
+---
+
+## Agent Skills
+
+Luna auto-discovers `SKILL.md` files and makes them available as `/skill:<name>` commands. Skills created for Claude Code or Cowork work here too.
+
+```
+~/.agents/skills/<name>/SKILL.md     ← shared across agents
+~/.claude/skills/<name>/SKILL.md     ← Claude Code / Cowork compatible
+<project>/.agents/skills/<name>/SKILL.md  ← project-local (highest priority)
+```
+
+Example skills are included in [`examples/skills/`](examples/skills/):
+
+| Skill | Description |
+|-------|-------------|
+| `git-commit` | Generate a Conventional Commits message from staged diff and commit |
+| `go-test-fix` | Run `go test` and fix failures until all tests pass |
+| `go-lint` | Run `go vet` + `golangci-lint` and fix all findings |
+| `code-review` | Review a file or git diff and output a structured report |
+| `pr-description` | Generate a GitHub PR description from the current branch diff |
+
+```bash
+# Install all example skills
+cp -r examples/skills/* ~/.agents/skills/
+```
+
+---
+
+## Tools
+
+| Tool | What it does |
+|------|-------------|
+| `read` | Read a file with line numbers (max 2000 lines) |
+| `write` | Write a file (prompts for confirmation on overwrite) |
+| `edit` | Apply a targeted `old_string → new_string` patch |
+| `bash` | Run a shell command (30s timeout, 10KB output cap) |
+| `grep` | Search files with a regex pattern |
 
 ---
 
@@ -182,30 +280,30 @@ LLM (think)
     │
     ├── Tool call? → execute → add result to history → back to LLM
     │
-    └── No tool call → print answer → done
+    └── No tool call → print answer → done (or continue if /goal active)
 ```
 
-| Tool | What it does |
-|------|-------------|
-| `read` | Read a file with line numbers (max 2000 lines) |
-| `write` | Write or overwrite a file |
-| `bash` | Run a shell command (30s timeout, 10KB output cap) |
-| `grep` | Search files with a regex pattern |
+Luna handles the quirks of local LLMs automatically:
+- **`<think>` tag stripping** — removes reasoning leaks from Qwen3 / DeepSeek-R1 models
+- **Fallback JSON parser** — handles models that emit tool calls as text instead of structured `tool_calls`
+- **Auto `num_ctx`** — sets `num_ctx: 32768` for Ollama endpoints to prevent silent context truncation
 
 ---
 
 ## Roadmap
 
-- [x] v0.1 — Core agent loop, 4 tools, Ollama + OpenAI support
-- [ ] v0.2 — Diff preview before write, context window management
-- [ ] v0.3 — `brew install`, prebuilt binaries via GitHub Actions
-- [ ] v1.0 — Stable API, plugin system
+- [x] v0.1 — Core agent loop, 5 tools, Ollama + OpenAI support
+- [x] v0.2 — `edit` tool, write confirmation, `.luna-context.md` inject, `/models` with RAM hints
+- [x] v0.3 — Dreaming-lite memory (`luna dream` / `luna memory` / `/dream`)
+- [x] v0.4 — liner REPL (tab completion, history, multi-line `[[`), Agent Skills, `/unsafe`, `/goal` autonomous loop
+- [x] v0.4.5 — Wall-clock loop timeout (default 30 min, `loop_timeout_min` config)
+- [ ] v1.0 — Prebuilt binaries via GitHub Actions, `ollama launch luna`, stable API
 
 ---
 
 ## Contributing
 
-Issues and PRs welcome. Luna's scope is intentionally narrow — new tools and features should clear a high bar. If you're unsure whether something fits, open an issue first.
+Issues and PRs welcome. Luna's scope is intentionally narrow — new features should clear a high bar. Open an issue first if you're unsure whether something fits.
 
 ---
 
