@@ -37,6 +37,9 @@ All tests pass. Refactored Parse to use a switch statement.
 | オフライン | ✅ | ❌ | ✅ | ✅ |
 | ツール数 | **5** | 30+ | git + edit | 4 |
 | セッション記憶 | ✅ Dreaming-lite | ✅ | ❌ | ❌ |
+| REPL readline | ✅ liner | ✅ | ✅ | ❌ |
+| 自律ループ | ✅ `/goal` | ✅ | ❌ | ❌ |
+| Agent Skills | ✅ | ✅ | ❌ | ❌ |
 
 > モデルが賢ければ、ツールは 5 つで十分。
 
@@ -77,7 +80,7 @@ cd luna-go && make build   # → ./luna
 > **Note:** `go build`（`-o` なし）はモジュール名から `luna-go` バイナリを生成します。
 > 必ず `make build` または `go build -o luna .` を使用してください。
 
-Go 1.22+ のみ。外部依存なし（`gopkg.in/yaml.v3` のみ）。
+Go 1.22+ のみ。外部依存 2 本（`gopkg.in/yaml.v3` + `github.com/peterh/liner`）。
 
 ---
 
@@ -152,7 +155,12 @@ luna config <show|init>
 | `/models` | Ollama モデル一覧と RAM 推奨を表示、切り替え |
 | `/dream` | セッションバッファを Ollama で整理して context.md に保存 |
 | `/memory [show\|status\|clear]` | 記憶の確認・管理 |
+| `/skills` | 利用可能なスキルの一覧を表示 |
+| `/skill:<name>` | スキルをロードして実行 |
+| `/unsafe` | bash / write の確認をセッション中だけ ON/OFF |
+| `/goal <text>` | ゴールを設定して達成まで自律実行 |
 | `/help` | コマンド一覧 |
+| `[[` | 多行入力モード（`]]` で確定） |
 | `exit` | 終了 |
 
 **クラウド API を使う場合：**
@@ -261,6 +269,7 @@ Luna は [ReAct](https://arxiv.org/abs/2210.03629) ループで動作します�
 - [x] v0.1 — コアエージェントループ、4 ツール、Ollama + OpenAI 対応
 - [x] v0.2 — `edit` ツール、write 前確認、`.luna-context.md` inject、セッションログ、`/models` + RAM 推奨
 - [x] v0.3 — Dreaming-lite（`luna dream` / `luna memory` / `/dream`）
+- [x] v0.4 — liner REPL（タブ補完・↑↓ヒストリー・多行入力）、Agent Skills、`/unsafe` トグル、`/goal` 自律ループ
 - [ ] v1.0 — バイナリ自動配布、`ollama launch luna`、安定 API
 
 ---
