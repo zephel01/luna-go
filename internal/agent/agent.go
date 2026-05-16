@@ -60,12 +60,27 @@ type Agent struct {
 	sessionLog string
 	onSlashCmd func(a *Agent, cmd string) bool
 	completer  func(string) []string // tab-completion candidates for REPL
+	rl         *liner.State          // active liner instance (non-nil only during REPL)
 }
 
 // SetCompleter registers a tab-completion function for the REPL.
 // fn receives the current line prefix and returns matching candidates.
 func (a *Agent) SetCompleter(fn func(string) []string) {
 	a.completer = fn
+}
+
+// ReadLine reads a line using the active liner instance (REPL mode) or plain stdin.
+// Slash-command handlers should use this instead of bufio.Scanner so they work
+// correctly while liner holds the terminal in raw mode.
+func (a *Agent) ReadLine(prompt string) (string, error) {
+	if a.rl != nil {
+		return a.rl.Prompt(prompt)
+	}
+	// Fallback for one-shot / non-REPL callers.
+	fmt.Fprint(os.Stderr, prompt)
+	var line string
+	_, err := fmt.Scanln(&line)
+	return strings.TrimSpace(line), err
 }
 
 // SetClient swaps the LLM client (e.g. after a /models switch).
@@ -249,7 +264,11 @@ func (a *Agent) REPL(ctx context.Context) {
 	defer a.saveHistory()
 
 	rl := liner.NewLiner()
-	defer rl.Close()
+	a.rl = rl
+	defer func() {
+		a.rl = nil
+		rl.Close()
+	}()
 	rl.SetCtrlCAborts(true) // Ctrl-C returns ErrPromptAborted instead of killing process
 
 	if a.completer != nil {
@@ -259,7 +278,8 @@ func (a *Agent) REPL(ctx context.Context) {
 	fmt.Fprintln(os.Stderr, "Luna v0.3  —  type your request, Tab to complete, Ctrl-C or 'exit' to quit")
 
 	for {
-		input, err := rl.Prompt("\n> ")
+		fmt.Fprintln(os.Stderr)
+		input, err := rl.Prompt("> ")
 		if err == liner.ErrPromptAborted || err == io.EOF {
 			break
 		}
