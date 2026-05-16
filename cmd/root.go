@@ -151,8 +151,8 @@ func Execute() {
 			fmt.Fprintf(os.Stderr, "%sy\n", prompt) // echo auto-y
 			return true
 		}
-		// Show [y/a/N]: 'a' enables autoApprove for the rest of the session.
-		line, err := a.ReadLine(strings.TrimSuffix(prompt, " ") + " [y/a/N] ")
+		// prompt already contains [y/a/N] — pass it directly.
+		line, err := a.ReadLine(prompt)
 		if err != nil {
 			return false
 		}
@@ -264,6 +264,7 @@ func makeCompleter(loadedSkills []skills.Skill) func(string) []string {
 		"/memory", "/memory show", "/memory status", "/memory clear",
 		"/skills",
 		"/unsafe",
+		"/goal", "/goal clear",
 		"/help",
 		"exit",
 	}
@@ -291,6 +292,22 @@ func makeSlashHandler(cfg *config.Config, loadedSkills []skills.Skill, toggleUns
 		switch {
 		case cmd == "/unsafe":
 			toggleUnsafe()
+		case cmd == "/goal" || strings.HasPrefix(cmd, "/goal "):
+			arg := strings.TrimSpace(strings.TrimPrefix(cmd, "/goal"))
+			switch arg {
+			case "":
+				if g := a.Goal(); g != "" {
+					fmt.Fprintf(os.Stderr, "🎯 goal: %s\n", g)
+				} else {
+					fmt.Fprintln(os.Stderr, "goal is not set — use /goal <text> to set one")
+				}
+			case "clear":
+				a.ClearGoal()
+				fmt.Fprintln(os.Stderr, "goal cleared")
+			default:
+				a.SetGoal(arg)
+				fmt.Fprintf(os.Stderr, "🎯 goal set: %s\n", arg)
+			}
 		case cmd == "/models":
 			handleModels(a, cfg)
 		case cmd == "/dream":

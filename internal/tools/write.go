@@ -71,7 +71,7 @@ func (t *WriteTool) Execute(_ context.Context, input json.RawMessage) (string, e
 		fmt.Fprintf(os.Stderr, "   existing: %d bytes (%d lines)\n", existing.Size(), oldLines)
 		fmt.Fprintf(os.Stderr, "   new:      %d bytes (%d lines)\n", len(args.Content), newLines)
 
-		const confirmPrompt = "Overwrite? [y/N] "
+		const confirmPrompt = "Overwrite? [y/a/N] "
 		var ok bool
 		if t.confirm != nil {
 			ok = t.confirm(confirmPrompt)
