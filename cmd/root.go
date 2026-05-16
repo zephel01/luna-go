@@ -133,6 +133,17 @@ func Execute() {
 	reg.Register(bashTool)
 	reg.Register(tools.NewGrepTool())
 
+	// Resolve loop timeout from config.
+	// LoopTimeoutMin: 0 = default (30 min), negative = no limit.
+	var loopTimeout time.Duration
+	switch {
+	case cfg.LoopTimeoutMin < 0:
+		loopTimeout = -1 // signals "no limit" to agent.New
+	case cfg.LoopTimeoutMin > 0:
+		loopTimeout = time.Duration(cfg.LoopTimeoutMin) * time.Minute
+	// 0 → leave as 0, agent.New applies 30 min default
+	}
+
 	// Build agent.
 	a := agent.New(client, reg, agent.Options{
 		MaxIter:      cfg.MaxIter,
@@ -140,6 +151,7 @@ func Execute() {
 		ExtraContext:  extraContext,
 		SkillsBlock:  skills.SystemPromptBlock(loadedSkills),
 		SessionLog:   sessionLogPath(),
+		LoopTimeout:  loopTimeout,
 		OnSlashCmd:   makeSlashHandler(cfg, loadedSkills, func() {}), // toggleUnsafe wired below
 	})
 

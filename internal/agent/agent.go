@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/peterh/liner"
 	"github.com/zephel01/luna-go/internal/llm"
@@ -44,6 +45,9 @@ type Options struct {
 	ExtraContext  string // content injected into system prompt (from .luna-context.md)
 	SkillsBlock  string // XML block listing available skills (from skills.Load)
 	SessionLog   string // path to write session JSONL (empty = disabled)
+	// LoopTimeout is the wall-clock limit per Run/loop call.
+	// 0 → default (30 min). Negative → no limit.
+	LoopTimeout  time.Duration
 	// OnSlashCmd is called when the user types a /command in REPL.
 	// Return true to continue the REPL, false to exit.
 	// If nil, unknown slash commands print a hint.
@@ -52,16 +56,17 @@ type Options struct {
 
 // Agent drives the ReAct loop: think → tool → observe → repeat.
 type Agent struct {
-	client     llm.Client
-	registry   *tools.Registry
-	history    []llm.Message
-	maxIter    int
-	stream     bool
-	sessionLog string
-	onSlashCmd func(a *Agent, cmd string) bool
-	completer  func(string) []string // tab-completion candidates for REPL
-	rl         *liner.State          // active liner instance (non-nil only during REPL)
-	goal       string                // session-level goal injected into every LLM request
+	client      llm.Client
+	registry    *tools.Registry
+	history     []llm.Message
+	maxIter     int
+	stream      bool
+	sessionLog  string
+	loopTimeout time.Duration        // wall-clock limit per Run call (0 = default 30 min)
+	onSlashCmd  func(a *Agent, cmd string) bool
+	completer   func(string) []string // tab-completion candidates for REPL
+	rl          *liner.State          // active liner instance (non-nil only during REPL)
+	goal        string                // session-level goal injected into every LLM request
 }
 
 // SetGoal sets the session-level goal.
@@ -129,14 +134,20 @@ func New(client llm.Client, registry *tools.Registry, opts Options) *Agent {
 			opts.SkillsBlock
 	}
 
+	loopTimeout := opts.LoopTimeout
+	if loopTimeout == 0 {
+		loopTimeout = 30 * time.Minute // default wall-clock limit
+	}
+
 	return &Agent{
-		client:     client,
-		registry:   registry,
-		history:    []llm.Message{{Role: "system", Content: sys}},
-		maxIter:    maxIter,
-		stream:     opts.Stream,
-		sessionLog: opts.SessionLog,
-		onSlashCmd: opts.OnSlashCmd,
+		client:      client,
+		registry:    registry,
+		history:     []llm.Message{{Role: "system", Content: sys}},
+		maxIter:     maxIter,
+		stream:      opts.Stream,
+		sessionLog:  opts.SessionLog,
+		loopTimeout: loopTimeout,
+		onSlashCmd:  opts.OnSlashCmd,
 	}
 }
 
@@ -176,7 +187,19 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 
 // loop is the core ReAct cycle.
 func (a *Agent) loop(ctx context.Context) error {
+	// Apply wall-clock timeout. Negative loopTimeout means no limit.
+	if a.loopTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, a.loopTimeout)
+		defer cancel()
+	}
+
 	for i := 0; i < a.maxIter; i++ {
+		// Check wall-clock timeout before each LLM call.
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("loop timeout (%s elapsed): %w", a.loopTimeout, err)
+		}
+
 		messages := a.history
 		// Inject goal as a leading system message so the model sees it every turn.
 		if a.goal != "" {

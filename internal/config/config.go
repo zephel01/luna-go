@@ -22,6 +22,9 @@ type Config struct {
 	// Set to -1 to disable auto-injection entirely.
 	NumCtx     int    `yaml:"num_ctx"`
 	NumPredict int    `yaml:"num_predict"`
+	// LoopTimeoutMin is the wall-clock limit (minutes) for a single Run/loop call.
+	// 0 means "use default (30 min)". Set to -1 to disable entirely.
+	LoopTimeoutMin int `yaml:"loop_timeout_min"`
 }
 
 func defaults() Config {
@@ -32,6 +35,7 @@ func defaults() Config {
 		MaxIter:  20,
 		Stream:   false, // non-streaming by default for reliable tool_calls parsing
 		// NumCtx / NumPredict: 0 → auto (applied by OpenAIClient for Ollama endpoints)
+		// LoopTimeoutMin: 0 → default (30 min)
 	}
 }
 
