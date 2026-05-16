@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
-	"os/exec"
 )
 
 const (
@@ -27,8 +27,13 @@ type BashTool struct {
 func NewBashTool(unsafe bool) *BashTool { return &BashTool{unsafe: unsafe} }
 
 // SetConfirm overrides the built-in stdin confirmation with a custom function.
+<<<<<<< HEAD
 // Use this to integrate with a readline library (e.g. liner) that holds the
 // terminal in raw mode, where bufio.Scanner would not work correctly.
+=======
+// Use this when a readline library (e.g. liner) holds the terminal in raw mode,
+// where bufio.Scanner would not work correctly.
+>>>>>>> d2c3f7a (fix(repl): liner UX fixes — confirm prompts + multi-line input)
 func (t *BashTool) SetConfirm(fn func(prompt string) bool) { t.confirm = fn }
 
 func (t *BashTool) Name() string { return "bash" }
@@ -62,12 +67,23 @@ func (t *BashTool) Execute(_ context.Context, input json.RawMessage) (string, er
 	}
 
 	if !t.unsafe {
+<<<<<<< HEAD
 		prompt := fmt.Sprintf("\n⚠  bash: %s\nRun? [y/N] ", args.Command)
 		var ok bool
 		if t.confirm != nil {
 			ok = t.confirm(prompt)
 		} else {
 			fmt.Fprint(os.Stderr, prompt)
+=======
+		// Print the warning banner separately (contains newlines which liner rejects in prompts).
+		fmt.Fprintf(os.Stderr, "\n⚠  bash: %s\n", args.Command)
+		const confirmPrompt = "Run? [y/N] "
+		var ok bool
+		if t.confirm != nil {
+			ok = t.confirm(confirmPrompt)
+		} else {
+			fmt.Fprint(os.Stderr, confirmPrompt)
+>>>>>>> d2c3f7a (fix(repl): liner UX fixes — confirm prompts + multi-line input)
 			scanner := bufio.NewScanner(os.Stdin)
 			if scanner.Scan() {
 				ans := strings.TrimSpace(strings.ToLower(scanner.Text()))

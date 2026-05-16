@@ -291,6 +291,29 @@ func (a *Agent) REPL(ctx context.Context) {
 		if input == "" {
 			continue
 		}
+
+		// Multi-line mode: [[ ... ]] collects lines until ]] is entered.
+		if input == "[[" {
+			var lines []string
+			for {
+				line, lerr := rl.Prompt("... ")
+				if lerr == liner.ErrPromptAborted || lerr == io.EOF {
+					break
+				}
+				if lerr != nil {
+					break
+				}
+				if strings.TrimSpace(line) == "]]" {
+					break
+				}
+				lines = append(lines, line)
+			}
+			input = strings.Join(lines, "\n")
+			if input == "" {
+				continue
+			}
+		}
+
 		rl.AppendHistory(input) // ↑↓ key history
 		if input == "exit" || input == "quit" {
 			break
@@ -305,6 +328,7 @@ func (a *Agent) REPL(ctx context.Context) {
 				fmt.Fprintln(os.Stderr, "  /skills          — list available skills")
 				fmt.Fprintln(os.Stderr, "  /skill:<name>    — load and execute a skill (Agent Skills standard)")
 				fmt.Fprintln(os.Stderr, "  /help            — show this message")
+				fmt.Fprintln(os.Stderr, "  [[               — start multi-line input (end with ]])")
 				fmt.Fprintln(os.Stderr, "  exit             — quit REPL")
 				continue
 			}
