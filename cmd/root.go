@@ -22,7 +22,7 @@ import (
 	"github.com/zephel01/luna-go/internal/tools"
 )
 
-const version = "0.3.0"
+const version = "0.5.0"
 
 // Execute is the main entrypoint called from main.go.
 func Execute() {
@@ -144,15 +144,30 @@ func Execute() {
 	// 0 → leave as 0, agent.New applies 30 min default
 	}
 
+	// Build optional context compression client.
+	// compress_threshold > 0 opts in; compress_model defaults to main model.
+	var compressClient llm.Client
+	if cfg.CompressThreshold > 0 {
+		compressModel := cfg.CompressModel
+		if compressModel == "" {
+			compressModel = cfg.Model
+		}
+		compressClient = llm.NewOpenAIClient(cfg.BaseURL, cfg.APIKey, compressModel)
+		fmt.Fprintf(os.Stderr, "🗜  context compression enabled (threshold: ~%d tokens, model: %s)\n",
+			cfg.CompressThreshold, compressModel)
+	}
+
 	// Build agent.
 	a := agent.New(client, reg, agent.Options{
-		MaxIter:      cfg.MaxIter,
-		Stream:       cfg.Stream,
-		ExtraContext:  extraContext,
-		SkillsBlock:  skills.SystemPromptBlock(loadedSkills),
-		SessionLog:   sessionLogPath(),
-		LoopTimeout:  loopTimeout,
-		OnSlashCmd:   makeSlashHandler(cfg, loadedSkills, func() {}), // toggleUnsafe wired below
+		MaxIter:           cfg.MaxIter,
+		Stream:            cfg.Stream,
+		ExtraContext:      extraContext,
+		SkillsBlock:       skills.SystemPromptBlock(loadedSkills),
+		SessionLog:        sessionLogPath(),
+		LoopTimeout:       loopTimeout,
+		OnSlashCmd:        makeSlashHandler(cfg, loadedSkills, func() {}), // toggleUnsafe wired below
+		CompressClient:    compressClient,
+		CompressThreshold: cfg.CompressThreshold,
 	})
 
 	// Wire liner-aware confirmation into tools that prompt the user.

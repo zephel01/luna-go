@@ -52,6 +52,12 @@ type Options struct {
 	// Return true to continue the REPL, false to exit.
 	// If nil, unknown slash commands print a hint.
 	OnSlashCmd func(a *Agent, cmd string) bool
+	// CompressClient is the LLM client used to summarise old context turns.
+	// If nil, context compression is disabled regardless of CompressThreshold.
+	CompressClient llm.Client
+	// CompressThreshold is the estimated token count that triggers compression.
+	// 0 (default) = disabled. Set to a positive value (e.g. 24000) to enable.
+	CompressThreshold int
 }
 
 // Agent drives the ReAct loop: think → tool → observe → repeat.
@@ -62,11 +68,13 @@ type Agent struct {
 	maxIter     int
 	stream      bool
 	sessionLog  string
-	loopTimeout time.Duration        // wall-clock limit per Run call (0 = default 30 min)
-	onSlashCmd  func(a *Agent, cmd string) bool
-	completer   func(string) []string // tab-completion candidates for REPL
-	rl          *liner.State          // active liner instance (non-nil only during REPL)
-	goal        string                // session-level goal injected into every LLM request
+	loopTimeout      time.Duration        // wall-clock limit per Run call (0 = default 30 min)
+	onSlashCmd       func(a *Agent, cmd string) bool
+	completer        func(string) []string // tab-completion candidates for REPL
+	rl               *liner.State          // active liner instance (non-nil only during REPL)
+	goal             string                // session-level goal injected into every LLM request
+	compressClient   llm.Client            // nil = compression disabled
+	compressThreshold int                  // estimated token threshold; 0 = disabled
 }
 
 // SetGoal sets the session-level goal.
@@ -139,15 +147,23 @@ func New(client llm.Client, registry *tools.Registry, opts Options) *Agent {
 		loopTimeout = 30 * time.Minute // default wall-clock limit
 	}
 
+	// Compression: only active when both client and a positive threshold are set.
+	compressThreshold := 0
+	if opts.CompressClient != nil && opts.CompressThreshold > 0 {
+		compressThreshold = opts.CompressThreshold
+	}
+
 	return &Agent{
-		client:      client,
-		registry:    registry,
-		history:     []llm.Message{{Role: "system", Content: sys}},
-		maxIter:     maxIter,
-		stream:      opts.Stream,
-		sessionLog:  opts.SessionLog,
-		loopTimeout: loopTimeout,
-		onSlashCmd:  opts.OnSlashCmd,
+		client:            client,
+		registry:          registry,
+		history:           []llm.Message{{Role: "system", Content: sys}},
+		maxIter:           maxIter,
+		stream:            opts.Stream,
+		sessionLog:        opts.SessionLog,
+		loopTimeout:       loopTimeout,
+		onSlashCmd:        opts.OnSlashCmd,
+		compressClient:    opts.CompressClient,
+		compressThreshold: compressThreshold,
 	}
 }
 
@@ -199,6 +215,9 @@ func (a *Agent) loop(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("loop timeout (%s elapsed): %w", a.loopTimeout, err)
 		}
+
+		// Compress old context turns if history is getting large.
+		a.maybeCompress(ctx)
 
 		messages := a.history
 		// Inject goal as a leading system message so the model sees it every turn.
