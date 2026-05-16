@@ -140,21 +140,42 @@ func Execute() {
 		ExtraContext:  extraContext,
 		SkillsBlock:  skills.SystemPromptBlock(loadedSkills),
 		SessionLog:   sessionLogPath(),
-		OnSlashCmd:   makeSlashHandler(cfg, loadedSkills),
+		OnSlashCmd:   makeSlashHandler(cfg, loadedSkills, func() {}), // toggleUnsafe wired below
 	})
 
 	// Wire liner-aware confirmation into tools that prompt the user.
-	// Prompt strings passed to confirm must be newline-free (liner constraint).
+	// autoApprove is shared via closure with the slash handler (/unsafe toggle).
+	autoApprove := cfg.Unsafe // inherit --unsafe flag at startup
 	confirmFn := func(prompt string) bool {
-		line, err := a.ReadLine(prompt)
+		if autoApprove {
+			fmt.Fprintf(os.Stderr, "%sy\n", prompt) // echo auto-y
+			return true
+		}
+		// Show [y/a/N]: 'a' enables autoApprove for the rest of the session.
+		line, err := a.ReadLine(strings.TrimSuffix(prompt, " ") + " [y/a/N] ")
 		if err != nil {
 			return false
 		}
 		ans := strings.TrimSpace(strings.ToLower(line))
+		if ans == "a" || ans == "all" {
+			autoApprove = true
+			fmt.Fprintln(os.Stderr, "⚠  unsafe mode ON — 以降の bash/write は自動承認")
+			return true
+		}
 		return ans == "y" || ans == "yes"
 	}
 	bashTool.SetConfirm(confirmFn)
 	writeTool.SetConfirm(confirmFn)
+
+	// Expose /unsafe toggle to the slash handler via makeSlashHandler.
+	toggleUnsafe := func() {
+		autoApprove = !autoApprove
+		if autoApprove {
+			fmt.Fprintln(os.Stderr, "⚠  unsafe mode ON — 以降の bash/write は自動承認")
+		} else {
+			fmt.Fprintln(os.Stderr, "✓  unsafe mode OFF — 確認を再有効化")
+		}
+	}
 
 	// Determine session ID for buffer capture.
 	sessionID := time.Now().Format("20060102-150405")
@@ -173,6 +194,9 @@ func Execute() {
 
 	// Register tab-completion candidates for the REPL.
 	a.SetCompleter(makeCompleter(loadedSkills))
+
+	// Re-wire slash handler now that toggleUnsafe is available.
+	a.SetSlashHandler(makeSlashHandler(cfg, loadedSkills, toggleUnsafe))
 
 	// Interactive REPL mode.
 	a.REPL(context.Background())
@@ -239,6 +263,7 @@ func makeCompleter(loadedSkills []skills.Skill) func(string) []string {
 		"/dream",
 		"/memory", "/memory show", "/memory status", "/memory clear",
 		"/skills",
+		"/unsafe",
 		"/help",
 		"exit",
 	}
@@ -261,9 +286,11 @@ func makeCompleter(loadedSkills []skills.Skill) func(string) []string {
 }
 
 // makeSlashHandler returns a handler for REPL slash commands.
-func makeSlashHandler(cfg *config.Config, loadedSkills []skills.Skill) func(a *agent.Agent, cmd string) bool {
+func makeSlashHandler(cfg *config.Config, loadedSkills []skills.Skill, toggleUnsafe func()) func(a *agent.Agent, cmd string) bool {
 	return func(a *agent.Agent, cmd string) bool {
 		switch {
+		case cmd == "/unsafe":
+			toggleUnsafe()
 		case cmd == "/models":
 			handleModels(a, cfg)
 		case cmd == "/dream":
