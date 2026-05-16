@@ -174,7 +174,8 @@ func TestStatus_WithData(t *testing.T) {
 	s := newTestStore(t)
 	text := strings.Repeat("z", 100)
 	s.AppendBuffer(text, "s")
-	s.WriteContext("line1\nline2\n")
+	// "line1\nline2" has 1 newline → strings.Count+1 = 2 lines
+	s.WriteContext("line1\nline2")
 
 	status := s.Status()
 	if !strings.Contains(status, "1 entries") {
