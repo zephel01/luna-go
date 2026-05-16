@@ -14,9 +14,10 @@
 6. [プロジェクトコンテキスト](#6-プロジェクトコンテキスト)
 7. [記憶機能（Dreaming-lite）](#7-記憶機能dreaming-lite)
 8. [スキル（Agent Skills）](#8-スキルagent-skills)
-9. [クラウド API を使う](#9-クラウド-api-を使う)
-10. [CodeRouter と組み合わせる](#10-coderouter-と組み合わせる)
-11. [トラブルシューティング](#11-トラブルシューティング)
+9. [自律実行モード（/goal）](#9-自律実行モードgoal)
+10. [クラウド API を使う](#10-クラウド-api-を使う)
+11. [CodeRouter と組み合わせる](#11-coderouter-と組み合わせる)
+12. [トラブルシューティング](#12-トラブルシューティング)
 
 ---
 
@@ -104,7 +105,7 @@ sudo mv luna /usr/local/bin/
 
 ```bash
 luna --version
-# luna-go v0.4.0
+# luna-go v0.4.4
 ```
 
 ---
@@ -234,11 +235,55 @@ luna
 |----------|------|
 | `/models` | Ollama モデル一覧と RAM 推奨を表示。番号を入力すると即切り替え |
 | `/dream` | セッションバッファを Ollama で整理して `context.md` に保存 |
-| `/memory` | `show` / `status` / `clear` で記憶を管理 |
+| `/memory [show\|status\|clear]` | 記憶を管理（表示 / 状態確認 / 削除） |
 | `/skills` | 利用可能なスキルの一覧を表示 |
 | `/skill:<name>` | 指定したスキルをロードして実行 |
+| `/unsafe` | bash / write の確認をセッション中だけ ON/OFF 切り替え |
+| `/goal <text>` | セッションゴールを設定（全 LLM ターンに注入・達成まで自律実行） |
+| `/goal` | 現在のゴールを確認 |
+| `/goal clear` | ゴールを削除 |
 | `/help` | コマンド一覧を表示 |
+| `[[` | 多行入力モード開始（`]]` で確定） |
 | `exit` / `quit` | REPL を終了 |
+
+### 多行入力（`[[` / `]]`）
+
+コードのコピペや複数行プロンプトを入力するには `[[` で多行モードを開始し、`]]` で確定します。
+
+```
+> [[
+... def fib(n):
+...     if n < 2: return n
+...     return fib(n-1) + fib(n-2)
+... ]]
+# 上記の関数をレビューして Go に移植してください
+```
+
+> **注意:** `[[` を使わずに改行を含む文字列を直接ペーストすると liner が途中で切断する場合があります。
+
+---
+
+### `/unsafe` — 確認スキップのトグル
+
+bash / write ツールは安全のため実行前に確認を求めます。セッション中だけまとめて承認したい場合は `/unsafe` で切り替えます。
+
+```
+> /unsafe
+⚠  unsafe mode ON — 以降の bash/write は自動承認
+
+> /unsafe
+✓  unsafe mode OFF — 確認を再有効化
+```
+
+確認プロンプト（`[y/a/N]`）で `a` を入力すると、その場で unsafe mode に切り替えて以降を全て承認することもできます。
+
+```
+⚠  bash: go test ./...
+Run? [y/a/N] a
+⚠  unsafe mode ON — 以降の bash/write は自動承認
+```
+
+---
 
 ### `/models` の使い方
 
@@ -377,7 +422,59 @@ description: ステージ済みの変更を確認してコミットメッセー�
 
 ---
 
-## 9. クラウド API を使う
+## 9. 自律実行モード（/goal）
+
+`/goal` でセッションレベルのゴールを設定すると、Luna はゴールを達成するまで自律的にツール呼び出しと応答を繰り返します。
+
+### 使い方
+
+```
+> /goal テストが全て通るように internal/tools/ のユニットテストを書く
+
+🎯 goal set: テストが全て通るように internal/tools/ のユニットテストを書く
+```
+
+ゴールが設定されると、Luna は以下を繰り返します:
+
+1. ツール呼び出し（read / bash / write / edit）
+2. 結果の観察
+3. 次のステップを判断
+4. 「ゴール達成: ...」と宣言するまで継続
+
+```
+> /goal ゴールが達成されるまで go test を実行してエラーを全て修正する
+
+⚙  bash({"command":"go test ./..."})
+... (失敗ログ)
+⚙  read({"path":"/path/to/failing_test.go"})
+...
+⚙  edit({"path":"...", "old_string":"...", "new_string":"..."})
+...
+⚙  bash({"command":"go test ./..."})
+... (全テスト PASS)
+
+ゴール達成: 全テストが通るようになりました。修正内容: ...
+```
+
+### ゴールの管理
+
+```
+> /goal                       # 現在のゴールを確認
+🎯 goal: テストが全て通るように...
+
+> /goal clear                  # ゴールを削除（通常の対話モードに戻る）
+goal cleared
+```
+
+### 注意事項
+
+- ゴール達成には**`/unsafe` か `--unsafe` フラグ**を推奨します（確認プロンプトでループが止まるため）
+- 最大ツール呼び出し回数（デフォルト 20）を超えるとタイムアウトします。複雑なタスクは `--max-iter 50` などで調整してください
+- ゴールを達成したらモデルは「ゴール達成:」で始まるメッセージを返し、REPL に戻ります
+
+---
+
+## 10. クラウド API を使う
 
 Luna は OpenAI 互換 API であればどれでも使えます。
 
@@ -404,7 +501,7 @@ base_url: https://api.openai.com/v1
 
 ---
 
-## 10. CodeRouter と組み合わせる
+## 11. CodeRouter と組み合わせる
 
 [CodeRouter](https://github.com/zephel01/CodeRouter) は、ローカル LLM とクラウド API の間に置くルーター層です。luna-go は OpenAI 互換 API をそのまま使っているため、`--base-url` を変えるだけで接続できます。
 
@@ -508,7 +605,7 @@ luna --base-url http://localhost:8088/v1 --model qwen2.5-coder:7b "hello"
 
 ---
 
-## 11. トラブルシューティング
+## 12. トラブルシューティング
 
 ### Ollama に接続できない
 
@@ -562,19 +659,23 @@ error: max iterations (20) reached without a final answer
 
 ---
 
-### bash ツールが確認を求めてくる
+### bash / write の確認プロンプトが毎回出る
 
 ```
-⚠ bash: run the following command? [y/N]
+⚠  bash: go test ./...
+Run? [y/a/N]
 ```
 
-これは安全のためのデフォルト動作です。スクリプト用途や信頼できるプロジェクトでは `--unsafe` フラグで抑制できます:
+これは安全のためのデフォルト動作です。以下の方法で抑制できます:
+
+- **その場で全承認**: プロンプトに `a` を入力 → セッション中は以降全て自動承認
+- **REPL 内でトグル**: `/unsafe` を実行 → ON/OFF が切り替わる
+- **起動時から有効**: `--unsafe` フラグを使う
+- **設定ファイルで固定**: `config.yaml` に `unsafe: true`
 
 ```bash
 luna --unsafe "run go test ./... and fix failing tests"
 ```
-
-または `config.yaml` に `unsafe: true` を設定してください。
 
 ---
 

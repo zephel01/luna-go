@@ -64,7 +64,7 @@ func (t *BashTool) Execute(_ context.Context, input json.RawMessage) (string, er
 	if !t.unsafe {
 		// Print the warning banner separately (contains newlines which liner rejects in prompts).
 		fmt.Fprintf(os.Stderr, "\n⚠  bash: %s\n", args.Command)
-		const confirmPrompt = "Run? [y/N] "
+		const confirmPrompt = "Run? [y/a/N] "
 		var ok bool
 		if t.confirm != nil {
 			ok = t.confirm(confirmPrompt)

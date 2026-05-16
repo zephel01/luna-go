@@ -61,7 +61,17 @@ type Agent struct {
 	onSlashCmd func(a *Agent, cmd string) bool
 	completer  func(string) []string // tab-completion candidates for REPL
 	rl         *liner.State          // active liner instance (non-nil only during REPL)
+	goal       string                // session-level goal injected into every LLM request
 }
+
+// SetGoal sets the session-level goal.
+func (a *Agent) SetGoal(goal string) { a.goal = goal }
+
+// Goal returns the current session-level goal.
+func (a *Agent) Goal() string { return a.goal }
+
+// ClearGoal removes the session-level goal.
+func (a *Agent) ClearGoal() { a.goal = "" }
 
 // SetCompleter registers a tab-completion function for the REPL.
 // fn receives the current line prefix and returns matching candidates.
@@ -167,8 +177,19 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 // loop is the core ReAct cycle.
 func (a *Agent) loop(ctx context.Context) error {
 	for i := 0; i < a.maxIter; i++ {
+		messages := a.history
+		// Inject goal as a leading system message so the model sees it every turn.
+		if a.goal != "" {
+			goalMsg := llm.Message{
+				Role: "system",
+				Content: "## 現在のゴール\n" + a.goal + "\n\n" +
+					"このゴールを達成するまで自律的に作業を続けること。" +
+					"ゴールを達成したら「ゴール達成:」で始まるメッセージで完了を宣言すること。",
+			}
+			messages = append([]llm.Message{goalMsg}, messages...)
+		}
 		req := llm.Request{
-			Messages: a.history,
+			Messages: messages,
 			Tools:    a.registry.Definitions(),
 		}
 
@@ -212,7 +233,8 @@ func (a *Agent) loop(ctx context.Context) error {
 			}
 		}
 
-		// No tool calls → final answer. Save to history, print, and exit loop.
+		// No tool calls → final answer. Save to history, print, and exit loop
+		// (or auto-continue when a goal is active and not yet achieved).
 		if len(resp.ToolCalls) == 0 {
 			if resp.Content != "" {
 				a.history = append(a.history, llm.Message{
@@ -224,6 +246,10 @@ func (a *Agent) loop(ctx context.Context) error {
 				}
 			}
 			fmt.Println()
+			// Goal mode: keep iterating until model declares "ゴール達成".
+			if a.goal != "" && !strings.Contains(resp.Content, "ゴール達成") {
+				continue
+			}
 			return nil
 		}
 
@@ -280,7 +306,10 @@ func (a *Agent) REPL(ctx context.Context) {
 		rl.SetCompleter(a.completer)
 	}
 
-	fmt.Fprintln(os.Stderr, "Luna v0.3  —  type your request, Tab to complete, Ctrl-C or 'exit' to quit")
+	fmt.Fprintln(os.Stderr, "Luna v0.4  —  type your request, Tab to complete, Ctrl-C or 'exit' to quit")
+	if a.goal != "" {
+		fmt.Fprintf(os.Stderr, "🎯 goal: %s\n", a.goal)
+	}
 
 	for {
 		fmt.Fprintln(os.Stderr)
@@ -333,6 +362,9 @@ func (a *Agent) REPL(ctx context.Context) {
 				fmt.Fprintln(os.Stderr, "  /skills          — list available skills")
 				fmt.Fprintln(os.Stderr, "  /skill:<name>    — load and execute a skill (Agent Skills standard)")
 				fmt.Fprintln(os.Stderr, "  /unsafe          — toggle auto-approve for bash/write (unsafe mode)")
+				fmt.Fprintln(os.Stderr, "  /goal <text>     — set session goal (injected into every LLM turn)")
+				fmt.Fprintln(os.Stderr, "  /goal            — show current goal")
+				fmt.Fprintln(os.Stderr, "  /goal clear      — clear goal")
 				fmt.Fprintln(os.Stderr, "  /help            — show this message")
 				fmt.Fprintln(os.Stderr, "  [[               — start multi-line input (end with ]])")
 				fmt.Fprintln(os.Stderr, "  exit             — quit REPL")
