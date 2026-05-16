@@ -1,0 +1,146 @@
+// Package memory manages persistent context for luna-go's Dreaming-lite feature.
+//
+// Directory layout:
+//
+//	~/.luna-go/memory/<project>/
+//	  context.md     — distilled memory injected into system prompt
+//	  buffer.jsonl   — raw assistant responses captured during sessions
+//	  skills/        — skill documents (future use)
+package memory
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// BufferEntry is a single captured assistant response.
+type BufferEntry struct {
+	Timestamp string `json:"ts"`
+	Text      string `json:"text"`
+	Project   string `json:"project"`
+	Session   string `json:"session"`
+}
+
+// Store manages memory files for a single project.
+type Store struct {
+	Project string
+	dir     string
+}
+
+// New returns a Store for the given project name.
+// Project is typically filepath.Base(cwd).
+func New(project string) (*Store, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(home, ".luna-go", "memory", project)
+	return &Store{Project: project, dir: dir}, nil
+}
+
+func (s *Store) ensure() error {
+	return os.MkdirAll(s.dir, 0o755)
+}
+
+func (s *Store) bufferPath()  string { return filepath.Join(s.dir, "buffer.jsonl") }
+
+// ContextPath returns the path to context.md for external use (inject).
+func (s *Store) ContextPath() string { return filepath.Join(s.dir, "context.md") }
+
+// SkillsDir returns the skills directory path.
+func (s *Store) SkillsDir() string { return filepath.Join(s.dir, "skills") }
+
+// AppendBuffer adds an assistant response to the buffer.
+// Entries shorter than minChars are skipped (tool results, one-liners).
+func (s *Store) AppendBuffer(text, sessionID string) error {
+	const minChars = 80
+	if len(strings.TrimSpace(text)) < minChars {
+		return nil
+	}
+	if err := s.ensure(); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(s.bufferPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return json.NewEncoder(f).Encode(BufferEntry{
+		Timestamp: time.Now().Format(time.RFC3339),
+		Text:      text,
+		Project:   s.Project,
+		Session:   sessionID,
+	})
+}
+
+// ReadBuffer returns all buffer entries.
+func (s *Store) ReadBuffer() ([]BufferEntry, error) {
+	data, err := os.ReadFile(s.bufferPath())
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var entries []BufferEntry
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var e BufferEntry
+		if err := json.Unmarshal([]byte(line), &e); err == nil {
+			entries = append(entries, e)
+		}
+	}
+	return entries, nil
+}
+
+// BufferCount returns the number of entries currently in the buffer.
+func (s *Store) BufferCount() (int, error) {
+	entries, err := s.ReadBuffer()
+	return len(entries), err
+}
+
+// ReadContext reads context.md. Returns empty string if the file doesn't exist.
+func (s *Store) ReadContext() (string, error) {
+	data, err := os.ReadFile(s.ContextPath())
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	return string(data), err
+}
+
+// WriteContext overwrites context.md with the given content.
+func (s *Store) WriteContext(content string) error {
+	if err := s.ensure(); err != nil {
+		return err
+	}
+	return os.WriteFile(s.ContextPath(), []byte(content), 0o644)
+}
+
+// ClearBuffer deletes buffer.jsonl.
+func (s *Store) ClearBuffer() error {
+	err := os.Remove(s.bufferPath())
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+// Status returns a human-readable summary of memory state.
+func (s *Store) Status() string {
+	count, _ := s.BufferCount()
+	ctx, _ := s.ReadContext()
+	ctxLines := 0
+	if ctx != "" {
+		ctxLines = strings.Count(ctx, "\n") + 1
+	}
+	return fmt.Sprintf(
+		"project : %s\nbuffer  : %d entries\ncontext : %d lines (%s)",
+		s.Project, count, ctxLines, s.ContextPath(),
+	)
+}

@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Go modules — weekly CVE patch PRs
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Asia/Tokyo
+    commit-message:
+      prefix: deps
+    open-pull-requests-limit: 10
+
+  # GitHub Actions — critical attack surface (tj-actions incident 等)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Asia/Tokyo
+    commit-message:
+      prefix: ci
+    open-pull-requests-limit: 5
