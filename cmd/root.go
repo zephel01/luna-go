@@ -123,12 +123,14 @@ func Execute() {
 		NumPredict: cfg.NumPredict,
 	})
 
-	// Build tool registry.
+	// Build tool registry. Keep references to tools that need confirm injection.
+	bashTool  := tools.NewBashTool(cfg.Unsafe)
+	writeTool := tools.NewWriteTool(cfg.Unsafe)
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewReadTool())
-	reg.Register(tools.NewWriteTool(cfg.Unsafe))
+	reg.Register(writeTool)
 	reg.Register(tools.NewEditTool())
-	reg.Register(tools.NewBashTool(cfg.Unsafe))
+	reg.Register(bashTool)
 	reg.Register(tools.NewGrepTool())
 
 	// Build agent.
@@ -140,6 +142,21 @@ func Execute() {
 		SessionLog:   sessionLogPath(),
 		OnSlashCmd:   makeSlashHandler(cfg, loadedSkills),
 	})
+
+	// Wire liner-aware confirmation into tools that prompt the user.
+	// This ensures y/N prompts work correctly while liner holds the terminal
+	// in raw mode during the REPL.
+	confirmFn := func(prompt string) bool {
+		fmt.Fprint(os.Stderr, prompt)
+		line, err := a.ReadLine("")
+		if err != nil {
+			return false
+		}
+		ans := strings.TrimSpace(strings.ToLower(line))
+		return ans == "y" || ans == "yes"
+	}
+	bashTool.SetConfirm(confirmFn)
+	writeTool.SetConfirm(confirmFn)
 
 	// Determine session ID for buffer capture.
 	sessionID := time.Now().Format("20060102-150405")

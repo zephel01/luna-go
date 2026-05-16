@@ -20,10 +20,16 @@ const (
 // BashTool executes a shell command and returns its combined output.
 // When unsafe=false (default), the user is prompted to confirm each command.
 type BashTool struct {
-	unsafe bool
+	unsafe  bool
+	confirm func(prompt string) bool // nil = built-in bufio fallback
 }
 
 func NewBashTool(unsafe bool) *BashTool { return &BashTool{unsafe: unsafe} }
+
+// SetConfirm overrides the built-in stdin confirmation with a custom function.
+// Use this to integrate with a readline library (e.g. liner) that holds the
+// terminal in raw mode, where bufio.Scanner would not work correctly.
+func (t *BashTool) SetConfirm(fn func(prompt string) bool) { t.confirm = fn }
 
 func (t *BashTool) Name() string { return "bash" }
 
@@ -56,13 +62,19 @@ func (t *BashTool) Execute(_ context.Context, input json.RawMessage) (string, er
 	}
 
 	if !t.unsafe {
-		fmt.Fprintf(os.Stderr, "\n⚠  bash: %s\nRun? [y/N] ", args.Command)
-		scanner := bufio.NewScanner(os.Stdin)
-		if !scanner.Scan() {
-			return "cancelled", nil
+		prompt := fmt.Sprintf("\n⚠  bash: %s\nRun? [y/N] ", args.Command)
+		var ok bool
+		if t.confirm != nil {
+			ok = t.confirm(prompt)
+		} else {
+			fmt.Fprint(os.Stderr, prompt)
+			scanner := bufio.NewScanner(os.Stdin)
+			if scanner.Scan() {
+				ans := strings.TrimSpace(strings.ToLower(scanner.Text()))
+				ok = ans == "y" || ans == "yes"
+			}
 		}
-		answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-		if answer != "y" && answer != "yes" {
+		if !ok {
 			return "cancelled by user", nil
 		}
 	}
