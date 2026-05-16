@@ -59,7 +59,6 @@ func (t *WriteTool) Execute(_ context.Context, input json.RawMessage) (string, e
 		return "", fmt.Errorf("path is required")
 	}
 
-	// Check if file already exists to decide confirmation behaviour.
 	existing, statErr := os.Stat(args.Path)
 	isOverwrite := statErr == nil && !existing.IsDir()
 
@@ -67,16 +66,17 @@ func (t *WriteTool) Execute(_ context.Context, input json.RawMessage) (string, e
 		oldLines := lineCount(args.Path)
 		newLines := strings.Count(args.Content, "\n") + 1
 
+		// Print info banner (may contain newlines — keep separate from prompt).
 		fmt.Fprintf(os.Stderr, "\n⚠  write: %s\n", args.Path)
 		fmt.Fprintf(os.Stderr, "   existing: %d bytes (%d lines)\n", existing.Size(), oldLines)
 		fmt.Fprintf(os.Stderr, "   new:      %d bytes (%d lines)\n", len(args.Content), newLines)
 
-		prompt := "Overwrite? [y/N] "
+		const confirmPrompt = "Overwrite? [y/N] "
 		var ok bool
 		if t.confirm != nil {
-			ok = t.confirm(prompt)
+			ok = t.confirm(confirmPrompt)
 		} else {
-			fmt.Fprint(os.Stderr, prompt)
+			fmt.Fprint(os.Stderr, confirmPrompt)
 			scanner := bufio.NewScanner(os.Stdin)
 			if scanner.Scan() {
 				ans := strings.TrimSpace(strings.ToLower(scanner.Text()))
