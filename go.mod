@@ -2,4 +2,12 @@ module github.com/zephel01/luna-go
 
 go 1.24.3
 
-require gopkg.in/yaml.v3 v3.0.1
+require (
+	github.com/peterh/liner v1.2.2
+	gopkg.in/yaml.v3 v3.0.1
+)
+
+require (
+	github.com/mattn/go-runewidth v0.0.3 // indirect
+	golang.org/x/sys v0.0.0-20211117180635-dee7805ff2e1 // indirect
+)

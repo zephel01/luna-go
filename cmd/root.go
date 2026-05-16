@@ -157,6 +157,9 @@ func Execute() {
 		return
 	}
 
+	// Register tab-completion candidates for the REPL.
+	a.SetCompleter(makeCompleter(loadedSkills))
+
 	// Interactive REPL mode.
 	a.REPL(context.Background())
 	captureToBuffer(store, a.History(), sessionID)
@@ -213,6 +216,35 @@ func sessionLogPath() string {
 }
 
 // --- Slash command handler ---
+
+// makeCompleter returns a tab-completion function for the REPL.
+// It covers all built-in slash commands and dynamically adds /skill:<name> entries.
+func makeCompleter(loadedSkills []skills.Skill) func(string) []string {
+	base := []string{
+		"/models",
+		"/dream",
+		"/memory", "/memory show", "/memory status", "/memory clear",
+		"/skills",
+		"/help",
+		"exit",
+	}
+	return func(line string) []string {
+		// Build candidate list: base + /skill:<name> per loaded skill
+		candidates := make([]string, len(base))
+		copy(candidates, base)
+		for _, s := range loadedSkills {
+			candidates = append(candidates, "/skill:"+s.Name)
+		}
+		// Filter by prefix
+		var matches []string
+		for _, c := range candidates {
+			if strings.HasPrefix(c, line) {
+				matches = append(matches, c)
+			}
+		}
+		return matches
+	}
+}
 
 // makeSlashHandler returns a handler for REPL slash commands.
 func makeSlashHandler(cfg *config.Config, loadedSkills []skills.Skill) func(a *agent.Agent, cmd string) bool {
