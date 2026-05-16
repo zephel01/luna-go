@@ -144,17 +144,9 @@ func Execute() {
 	})
 
 	// Wire liner-aware confirmation into tools that prompt the user.
-<<<<<<< HEAD
-	// This ensures y/N prompts work correctly while liner holds the terminal
-	// in raw mode during the REPL.
-	confirmFn := func(prompt string) bool {
-		fmt.Fprint(os.Stderr, prompt)
-		line, err := a.ReadLine("")
-=======
 	// Prompt strings passed to confirm must be newline-free (liner constraint).
 	confirmFn := func(prompt string) bool {
 		line, err := a.ReadLine(prompt)
->>>>>>> d2c3f7a (fix(repl): liner UX fixes — confirm prompts + multi-line input)
 		if err != nil {
 			return false
 		}
