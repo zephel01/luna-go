@@ -125,6 +125,7 @@ func Execute() {
 
 	// Build tool registry. Keep references to tools that need confirm injection.
 	bashTool  := tools.NewBashTool(cfg.Unsafe)
+	defer bashTool.Close() // shut down the persistent shell on exit
 	writeTool := tools.NewWriteTool(cfg.Unsafe)
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewReadTool())
@@ -133,6 +134,7 @@ func Execute() {
 	reg.Register(bashTool)
 	reg.Register(tools.NewGrepTool())
 	reg.Register(tools.NewFindTool())
+	reg.Register(tools.NewLsTool())
 
 	// Resolve loop timeout from config.
 	// LoopTimeoutMin: 0 = default (30 min), negative = no limit.
@@ -293,6 +295,7 @@ func makeCompleter(loadedSkills []skills.Skill) func(string) []string {
 		"/skills",
 		"/unsafe",
 		"/goal", "/goal clear",
+		"/tree",
 		"/help",
 		"exit",
 	}
@@ -318,6 +321,8 @@ func makeCompleter(loadedSkills []skills.Skill) func(string) []string {
 func makeSlashHandler(cfg *config.Config, loadedSkills []skills.Skill, toggleUnsafe func()) func(a *agent.Agent, cmd string) bool {
 	return func(a *agent.Agent, cmd string) bool {
 		switch {
+		case cmd == "/tree":
+			handleTree(a)
 		case cmd == "/unsafe":
 			toggleUnsafe()
 		case cmd == "/goal" || strings.HasPrefix(cmd, "/goal "):
@@ -360,6 +365,52 @@ func makeSlashHandler(cfg *config.Config, loadedSkills []skills.Skill, toggleUns
 		}
 		return true // always continue REPL
 	}
+}
+
+// handleTree prints a summary of the current session's conversation history.
+func handleTree(a *agent.Agent) {
+	history := a.History()
+	if len(history) == 0 {
+		fmt.Fprintln(os.Stderr, "(no history)")
+		return
+	}
+	fmt.Fprintln(os.Stderr, "\nSession history:")
+	turn := 0
+	for i, m := range history {
+		prefix := "  "
+		label := m.Role
+		switch m.Role {
+		case "system":
+			label = "⚙ system"
+		case "user":
+			turn++
+			label = fmt.Sprintf("👤 [%d] user", turn)
+			prefix = "  "
+		case "assistant":
+			label = fmt.Sprintf("🤖 [%d] assistant", turn)
+			if len(m.ToolCalls) > 0 {
+				tools := make([]string, len(m.ToolCalls))
+				for j, tc := range m.ToolCalls {
+					tools[j] = tc.Function.Name
+				}
+				label += fmt.Sprintf(" → tool: %s", strings.Join(tools, ", "))
+			}
+		case "tool":
+			label = fmt.Sprintf("🔧 [%d] tool(%s)", turn, m.Name)
+			prefix = "      "
+		}
+		// Truncate content for display.
+		content := strings.ReplaceAll(m.Content, "\n", " ")
+		if len(content) > 80 {
+			content = content[:80] + "…"
+		}
+		if i == len(history)-1 {
+			fmt.Fprintf(os.Stderr, "%s└─ %s  %s\n", prefix, label, content)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s├─ %s  %s\n", prefix, label, content)
+		}
+	}
+	fmt.Fprintf(os.Stderr, "   (%d messages)\n\n", len(history))
 }
 
 // handleSkillsList prints all available skills.
