@@ -272,6 +272,7 @@ Luna は [ReAct](https://arxiv.org/abs/2210.03629) ループで動作します�
 - [x] v0.4 — liner REPL（タブ補完・↑↓ヒストリー・多行入力）、Agent Skills、`/unsafe` トグル、`/goal` 自律ループ
 - [x] v0.4.5 — ウォールクロックループタイムアウト（デフォルト 30 分、`loop_timeout_min` 設定）
 - [x] v0.5 — 自動コンテキスト圧縮（`compress_threshold` + `compress_model`）
+- [x] v0.6 — compaction ファイルリスト引き継ぎ、自動リトライ、`find` ツール追加（6 本目）
 - [ ] v1.0 — バイナリ自動配布、`ollama launch luna`、安定 API
 
 ---
