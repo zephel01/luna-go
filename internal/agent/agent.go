@@ -73,8 +73,9 @@ type Agent struct {
 	completer        func(string) []string // tab-completion candidates for REPL
 	rl               *liner.State          // active liner instance (non-nil only during REPL)
 	goal             string                // session-level goal injected into every LLM request
-	compressClient   llm.Client            // nil = compression disabled
-	compressThreshold int                  // estimated token threshold; 0 = disabled
+	compressClient    llm.Client // nil = compression disabled
+	compressThreshold int        // estimated token threshold; 0 = disabled
+	lastSummary       string     // previous compaction summary for iterative updates
 }
 
 // SetGoal sets the session-level goal.
@@ -398,19 +399,21 @@ func (a *Agent) REPL(ctx context.Context) {
 		if strings.HasPrefix(input, "/") {
 			if input == "/help" {
 				fmt.Fprintln(os.Stderr, "Commands:")
-				fmt.Fprintln(os.Stderr, "  /models          — list and switch Ollama models (with RAM recommendation)")
-				fmt.Fprintln(os.Stderr, "  /dream           — consolidate session buffer into context.md via Ollama")
+				fmt.Fprintln(os.Stderr, "  /models               — list and switch Ollama models (with RAM recommendation)")
+				fmt.Fprintln(os.Stderr, "  /dream                — consolidate session buffer into context.md via Ollama")
 				fmt.Fprintln(os.Stderr, "  /memory [show|status|clear] — inspect or clear memory")
-				fmt.Fprintln(os.Stderr, "  /skills          — list available skills")
-				fmt.Fprintln(os.Stderr, "  /skill:<name>    — load and execute a skill (Agent Skills standard)")
-				fmt.Fprintln(os.Stderr, "  /unsafe          — toggle auto-approve for bash/write (unsafe mode)")
-				fmt.Fprintln(os.Stderr, "  /tree            — show session conversation history")
-				fmt.Fprintln(os.Stderr, "  /goal <text>     — set session goal (injected into every LLM turn)")
-				fmt.Fprintln(os.Stderr, "  /goal            — show current goal")
-				fmt.Fprintln(os.Stderr, "  /goal clear      — clear goal")
-				fmt.Fprintln(os.Stderr, "  /help            — show this message")
-				fmt.Fprintln(os.Stderr, "  [[               — start multi-line input (end with ]])")
-				fmt.Fprintln(os.Stderr, "  exit             — quit REPL")
+				fmt.Fprintln(os.Stderr, "  /skills               — list available skills")
+				fmt.Fprintln(os.Stderr, "  /skill:<name> [args]  — load and execute a skill (Agent Skills standard)")
+				fmt.Fprintln(os.Stderr, "  /prompts              — list available prompt templates")
+				fmt.Fprintln(os.Stderr, "  /prompt:<name> [args] — expand and send a prompt template ($1,$2,$@ substitution)")
+				fmt.Fprintln(os.Stderr, "  /unsafe               — toggle auto-approve for bash/write (unsafe mode)")
+				fmt.Fprintln(os.Stderr, "  /tree                 — show session conversation history")
+				fmt.Fprintln(os.Stderr, "  /goal <text>          — set session goal (injected into every LLM turn)")
+				fmt.Fprintln(os.Stderr, "  /goal                 — show current goal")
+				fmt.Fprintln(os.Stderr, "  /goal clear           — clear goal")
+				fmt.Fprintln(os.Stderr, "  /help                 — show this message")
+				fmt.Fprintln(os.Stderr, "  [[                    — start multi-line input (end with ]])")
+				fmt.Fprintln(os.Stderr, "  exit                  — quit REPL")
 				continue
 			}
 			if a.onSlashCmd != nil {

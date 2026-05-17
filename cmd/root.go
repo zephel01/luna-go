@@ -18,11 +18,12 @@ import (
 	"github.com/zephel01/luna-go/internal/config"
 	"github.com/zephel01/luna-go/internal/llm"
 	"github.com/zephel01/luna-go/internal/memory"
+	"github.com/zephel01/luna-go/internal/prompts"
 	"github.com/zephel01/luna-go/internal/skills"
 	"github.com/zephel01/luna-go/internal/tools"
 )
 
-const version = "0.5.0"
+const version = "0.8.0"
 
 // Execute is the main entrypoint called from main.go.
 func Execute() {
@@ -117,6 +118,17 @@ func Execute() {
 		fmt.Fprintln(os.Stderr, strings.Join(names, ", "))
 	}
 
+	// Discover prompt templates from ~/.luna-go/prompts/.
+	loadedPrompts := prompts.Load()
+	if len(loadedPrompts) > 0 {
+		fmt.Fprintf(os.Stderr, "📝 loaded %d prompt template(s): ", len(loadedPrompts))
+		pnames := make([]string, len(loadedPrompts))
+		for i, p := range loadedPrompts {
+			pnames[i] = p.Name
+		}
+		fmt.Fprintln(os.Stderr, strings.Join(pnames, ", "))
+	}
+
 	// Build LLM client (single OpenAI-compatible implementation for both Ollama and OpenAI).
 	var client llm.Client = llm.NewOpenAIClient(cfg.BaseURL, cfg.APIKey, cfg.Model, llm.ClientOptions{
 		NumCtx:     cfg.NumCtx,
@@ -168,7 +180,7 @@ func Execute() {
 		SkillsBlock:       skills.SystemPromptBlock(loadedSkills),
 		SessionLog:        sessionLogPath(),
 		LoopTimeout:       loopTimeout,
-		OnSlashCmd:        makeSlashHandler(cfg, loadedSkills, func() {}), // toggleUnsafe wired below
+		OnSlashCmd:        makeSlashHandler(cfg, loadedSkills, loadedPrompts, func() {}), // toggleUnsafe wired below
 		CompressClient:    compressClient,
 		CompressThreshold: cfg.CompressThreshold,
 	})
@@ -223,10 +235,10 @@ func Execute() {
 	}
 
 	// Register tab-completion candidates for the REPL.
-	a.SetCompleter(makeCompleter(loadedSkills))
+	a.SetCompleter(makeCompleter(loadedSkills, loadedPrompts))
 
 	// Re-wire slash handler now that toggleUnsafe is available.
-	a.SetSlashHandler(makeSlashHandler(cfg, loadedSkills, toggleUnsafe))
+	a.SetSlashHandler(makeSlashHandler(cfg, loadedSkills, loadedPrompts, toggleUnsafe))
 
 	// Interactive REPL mode.
 	a.REPL(context.Background())
@@ -286,13 +298,15 @@ func sessionLogPath() string {
 // --- Slash command handler ---
 
 // makeCompleter returns a tab-completion function for the REPL.
-// It covers all built-in slash commands and dynamically adds /skill:<name> entries.
-func makeCompleter(loadedSkills []skills.Skill) func(string) []string {
+// It covers all built-in slash commands and dynamically adds /skill:<name>
+// and /prompt:<name> entries.
+func makeCompleter(loadedSkills []skills.Skill, loadedPrompts []prompts.Template) func(string) []string {
 	base := []string{
 		"/models",
 		"/dream",
 		"/memory", "/memory show", "/memory status", "/memory clear",
 		"/skills",
+		"/prompts",
 		"/unsafe",
 		"/goal", "/goal clear",
 		"/tree",
@@ -300,11 +314,14 @@ func makeCompleter(loadedSkills []skills.Skill) func(string) []string {
 		"exit",
 	}
 	return func(line string) []string {
-		// Build candidate list: base + /skill:<name> per loaded skill
+		// Build candidate list: base + /skill:<name> + /prompt:<name>
 		candidates := make([]string, len(base))
 		copy(candidates, base)
 		for _, s := range loadedSkills {
 			candidates = append(candidates, "/skill:"+s.Name)
+		}
+		for _, p := range loadedPrompts {
+			candidates = append(candidates, "/prompt:"+p.Name)
 		}
 		// Filter by prefix
 		var matches []string
@@ -318,7 +335,7 @@ func makeCompleter(loadedSkills []skills.Skill) func(string) []string {
 }
 
 // makeSlashHandler returns a handler for REPL slash commands.
-func makeSlashHandler(cfg *config.Config, loadedSkills []skills.Skill, toggleUnsafe func()) func(a *agent.Agent, cmd string) bool {
+func makeSlashHandler(cfg *config.Config, loadedSkills []skills.Skill, loadedPrompts []prompts.Template, toggleUnsafe func()) func(a *agent.Agent, cmd string) bool {
 	return func(a *agent.Agent, cmd string) bool {
 		switch {
 		case cmd == "/tree":
@@ -352,7 +369,6 @@ func makeSlashHandler(cfg *config.Config, loadedSkills []skills.Skill, toggleUns
 			handleSkillsList(loadedSkills)
 		case strings.HasPrefix(cmd, "/skill:"):
 			name := strings.TrimPrefix(cmd, "/skill:")
-			// Support "/skill:name extra args"
 			parts := strings.SplitN(name, " ", 2)
 			skillName := strings.TrimSpace(parts[0])
 			args := ""
@@ -360,6 +376,17 @@ func makeSlashHandler(cfg *config.Config, loadedSkills []skills.Skill, toggleUns
 				args = strings.TrimSpace(parts[1])
 			}
 			handleSkillRun(a, loadedSkills, skillName, args)
+		case cmd == "/prompts":
+			handlePromptsList(loadedPrompts)
+		case strings.HasPrefix(cmd, "/prompt:"):
+			rest := strings.TrimPrefix(cmd, "/prompt:")
+			parts := strings.SplitN(rest, " ", 2)
+			promptName := strings.TrimSpace(parts[0])
+			argStr := ""
+			if len(parts) > 1 {
+				argStr = strings.TrimSpace(parts[1])
+			}
+			handlePromptRun(a, loadedPrompts, promptName, argStr)
 		default:
 			fmt.Fprintf(os.Stderr, "unknown command %q — type /help\n", cmd)
 		}
@@ -411,6 +438,52 @@ func handleTree(a *agent.Agent) {
 		}
 	}
 	fmt.Fprintf(os.Stderr, "   (%d messages)\n\n", len(history))
+}
+
+// handlePromptsList prints all available prompt templates.
+func handlePromptsList(loadedPrompts []prompts.Template) {
+	if len(loadedPrompts) == 0 {
+		fmt.Fprintln(os.Stderr, "no prompt templates found — place *.md files in ~/.luna-go/prompts/")
+		return
+	}
+	fmt.Fprintln(os.Stderr, "\nAvailable prompt templates:")
+	for _, p := range loadedPrompts {
+		hint := ""
+		if p.ArgumentHint != "" {
+			hint = " " + p.ArgumentHint
+		}
+		desc := p.Description
+		if desc == "" {
+			desc = "(no description)"
+		}
+		fmt.Fprintf(os.Stderr, "  /prompt:%-24s %s\n", p.Name+hint, desc)
+	}
+}
+
+// handlePromptRun expands a prompt template with the given argument string and
+// sends the result to the agent as a user message.
+func handlePromptRun(a *agent.Agent, loadedPrompts []prompts.Template, name, argStr string) {
+	var tmpl *prompts.Template
+	for i := range loadedPrompts {
+		if loadedPrompts[i].Name == name {
+			tmpl = &loadedPrompts[i]
+			break
+		}
+	}
+	if tmpl == nil {
+		fmt.Fprintf(os.Stderr, "prompt %q not found — use /prompts to list available templates\n", name)
+		return
+	}
+	// Split argStr into individual args (simple space split, no quoting).
+	var args []string
+	if argStr != "" {
+		args = strings.Fields(argStr)
+	}
+	expanded := tmpl.Expand(args)
+	fmt.Fprintf(os.Stderr, "📝 running prompt: %s\n", tmpl.Name)
+	if err := a.Run(context.Background(), expanded); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	}
 }
 
 // handleSkillsList prints all available skills.
