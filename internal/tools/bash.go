@@ -2,13 +2,12 @@ package tools
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,24 +16,49 @@ const (
 	bashTimeout    = 30 * time.Second
 )
 
-// BashTool executes a shell command and returns its combined output.
+// BashTool executes shell commands inside a persistent bash process.
+// Environment variables and the current directory are preserved across calls
+// within the same session.
 // When unsafe=false (default), the user is prompted to confirm each command.
 type BashTool struct {
 	unsafe  bool
 	confirm func(prompt string) bool // nil = built-in bufio fallback
+
+	shellOnce sync.Once
+	shell     *persistentShell
+	shellErr  error
 }
 
 func NewBashTool(unsafe bool) *BashTool { return &BashTool{unsafe: unsafe} }
 
 // SetConfirm overrides the built-in stdin confirmation with a custom function.
-// Use this when a readline library (e.g. liner) holds the terminal in raw mode,
-// where bufio.Scanner would not work correctly.
 func (t *BashTool) SetConfirm(fn func(prompt string) bool) { t.confirm = fn }
+
+// Close shuts down the underlying persistent shell. Call on session exit.
+func (t *BashTool) Close() {
+	t.shellOnce.Do(func() {}) // ensure once is marked done
+	if t.shell != nil {
+		t.shell.close()
+	}
+}
+
+func (t *BashTool) getShell() (*persistentShell, error) {
+	t.shellOnce.Do(func() {
+		t.shell, t.shellErr = newPersistentShell()
+	})
+	// If the shell died between calls, try restarting.
+	if t.shellErr == nil && !t.shell.alive() {
+		t.shell, t.shellErr = newPersistentShell()
+	}
+	return t.shell, t.shellErr
+}
 
 func (t *BashTool) Name() string { return "bash" }
 
 func (t *BashTool) Description() string {
-	return "Execute a shell command. Returns stdout and stderr combined. 30s timeout, 10KB output limit."
+	return "Execute a shell command in a persistent bash session. " +
+		"Environment variables and working directory (cd) are preserved across calls. " +
+		"30s timeout per command, 10KB output limit."
 }
 
 func (t *BashTool) InputSchema() map[string]any {
@@ -62,7 +86,6 @@ func (t *BashTool) Execute(_ context.Context, input json.RawMessage) (string, er
 	}
 
 	if !t.unsafe {
-		// Print the warning banner separately (contains newlines which liner rejects in prompts).
 		fmt.Fprintf(os.Stderr, "\n⚠  bash: %s\n", args.Command)
 		const confirmPrompt = "Run? [y/a/N] "
 		var ok bool
@@ -81,18 +104,17 @@ func (t *BashTool) Execute(_ context.Context, input json.RawMessage) (string, er
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), bashTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "sh", "-c", args.Command)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	_ = cmd.Run()
-
-	result := out.String()
-	if len(result) > maxOutputBytes {
-		result = "... (truncated)\n" + result[len(result)-maxOutputBytes:]
+	sh, err := t.getShell()
+	if err != nil {
+		return "", fmt.Errorf("shell: %w", err)
 	}
-	return result, nil
+
+	output, exitCode, err := sh.exec(bashTimeout, args.Command)
+	if err != nil {
+		return "", err
+	}
+	if exitCode != 0 {
+		output = fmt.Sprintf("(exit %d)\n%s", exitCode, output)
+	}
+	return output, nil
 }

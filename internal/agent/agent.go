@@ -404,6 +404,7 @@ func (a *Agent) REPL(ctx context.Context) {
 				fmt.Fprintln(os.Stderr, "  /skills          — list available skills")
 				fmt.Fprintln(os.Stderr, "  /skill:<name>    — load and execute a skill (Agent Skills standard)")
 				fmt.Fprintln(os.Stderr, "  /unsafe          — toggle auto-approve for bash/write (unsafe mode)")
+				fmt.Fprintln(os.Stderr, "  /tree            — show session conversation history")
 				fmt.Fprintln(os.Stderr, "  /goal <text>     — set session goal (injected into every LLM turn)")
 				fmt.Fprintln(os.Stderr, "  /goal            — show current goal")
 				fmt.Fprintln(os.Stderr, "  /goal clear      — clear goal")
