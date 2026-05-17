@@ -30,7 +30,7 @@ func newPersistentShell() (*persistentShell, error) {
 
 func (s *persistentShell) start() error {
 	cmd := exec.Command("bash", "--norc", "--noprofile")
-	cmd.Env = append(cmd.Environ()) // inherit environment
+	cmd.Env = cmd.Environ() // inherit environment
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
