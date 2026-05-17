@@ -35,7 +35,7 @@ All tests pass. Refactored Parse to use a switch statement.
 | 配布形式 | **単一バイナリ** | npm | pip | TypeScript |
 | デフォルト | **Ollama (ローカル)** | Anthropic API | Any | Ollama |
 | オフライン | ✅ | ❌ | ✅ | ✅ |
-| ツール数 | **6** | 30+ | git + edit | 7 |
+| ツール数 | **7** | 30+ | git + edit | 7 |
 | セッション記憶 | ✅ Dreaming-lite | ✅ | ❌ | ❌ |
 | REPL readline | ✅ liner | ✅ | ✅ | ❌ |
 | 自律ループ | ✅ `/goal` | ✅ | ❌ | ❌ |
