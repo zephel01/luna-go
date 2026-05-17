@@ -15,9 +15,10 @@
 7. [記憶機能（Dreaming-lite）](#7-記憶機能dreaming-lite)
 8. [スキル（Agent Skills）](#8-スキルagent-skills)
 9. [自律実行モード（/goal）](#9-自律実行モードgoal)
-10. [クラウド API を使う](#10-クラウド-api-を使う)
-11. [CodeRouter と組み合わせる](#11-coderouter-と組み合わせる)
-12. [トラブルシューティング](#12-トラブルシューティング)
+10. [コンテキスト自動圧縮](#10-コンテキスト自動圧縮)
+11. [クラウド API を使う](#11-クラウド-api-を使う)
+12. [CodeRouter と組み合わせる](#12-coderouter-と組み合わせる)
+13. [トラブルシューティング](#13-トラブルシューティング)
 
 ---
 
@@ -105,7 +106,7 @@ sudo mv luna /usr/local/bin/
 
 ```bash
 luna --version
-# luna-go v0.4.4
+# luna-go v0.5.0
 ```
 
 ---
@@ -123,10 +124,15 @@ provider: ollama
 base_url: http://localhost:11434
 
 # オプション設定
-max_iter: 20      # ツール呼び出しの最大回数
-unsafe: false     # true にすると bash/write の確認をスキップ
-stream: false     # true にするとストリーミング出力を有効化
-num_ctx: 0        # コンテキスト長（0 = モデルデフォルト）
+max_iter: 20          # ツール呼び出しの最大回数
+unsafe: false         # true にすると bash/write の確認をスキップ
+stream: false         # true にするとストリーミング出力を有効化
+num_ctx: 0            # コンテキスト長（0 = 自動 32768）
+loop_timeout_min: 0   # /goal ループのタイムアウト分（0 = デフォルト 30 分、-1 = 無制限）
+
+# コンテキスト自動圧縮（v0.5 — デフォルト無効、opt-in）
+# compress_threshold: 24000   # 推定トークン数がこの値を超えたら中間ターンを要約圧縮
+# compress_model: qwen2.5:1.5b  # 要約用モデル（省略時はメインモデルを使用）
 ```
 
 `luna config init` で雛形を自動生成することもできます:
@@ -474,7 +480,50 @@ goal cleared
 
 ---
 
-## 10. クラウド API を使う
+## 10. コンテキスト自動圧縮
+
+長い `/goal` セッションや多ターンの対話を続けると、会話履歴（コンテキスト）が膨らみ、モデルの応答品質が低下することがあります。v0.5 では **自動コンテキスト圧縮** をオプトインで有効にできます。
+
+### 仕組み
+
+各 LLM 呼び出し前に推定トークン数（文字数 ÷ 4）を計算し、設定した閾値を超えたとき、古い中間ターンを要約して 1 メッセージに圧縮します。システムメッセージと直近 6 ターンは常に原文のまま保持されます。
+
+```
+有効化前: [system] [turn1] [turn2] ... [turn18] [turn19] [turn20]
+圧縮後:   [system] [要約: turn1〜14 の概要] [turn15] ... [turn20]
+```
+
+### 設定方法
+
+`~/.luna-go/config.yaml` に以下を追加します:
+
+```yaml
+# 推定トークン数が 24000 を超えたら圧縮（デフォルトは無効）
+compress_threshold: 24000
+
+# 要約に使うモデル（省略するとメインモデルを使用）
+compress_model: qwen2.5:1.5b
+```
+
+> **ヒント:** `qwen2.5:1.5b`（約 1 GB）は要約タスクに十分な速度と精度を持ちます。メインモデルが大型の場合は小型モデルを指定すると圧縮が高速になります。
+
+### 動作確認
+
+圧縮が発火すると stderr に表示されます:
+
+```
+🗜  context compressed (~26400 → ~4200 estimated tokens)
+```
+
+### 注意事項
+
+- 要約は必ずしも完全ではありません。重要な詳細が失われる可能性があります。
+- 精度が重要なタスクでは `/dream` による手動整理を推奨します。
+- `compress_threshold: 0`（デフォルト）では圧縮は無効です。
+
+---
+
+## 11. クラウド API を使う
 
 Luna は OpenAI 互換 API であればどれでも使えます。
 
@@ -501,7 +550,7 @@ base_url: https://api.openai.com/v1
 
 ---
 
-## 11. CodeRouter と組み合わせる
+## 12. CodeRouter と組み合わせる
 
 [CodeRouter](https://github.com/zephel01/CodeRouter) は、ローカル LLM とクラウド API の間に置くルーター層です。luna-go は OpenAI 互換 API をそのまま使っているため、`--base-url` を変えるだけで接続できます。
 
@@ -605,7 +654,7 @@ luna --base-url http://localhost:8088/v1 --model qwen2.5-coder:7b "hello"
 
 ---
 
-## 12. トラブルシューティング
+## 13. トラブルシューティング
 
 ### Ollama に接続できない
 
