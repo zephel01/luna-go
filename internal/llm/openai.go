@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -175,21 +176,77 @@ func fromOAIToolCalls(tcs []oaiToolCall) []ToolCall {
 	return out
 }
 
+// isRetryable reports whether an HTTP status code warrants a retry.
+func isRetryable(statusCode int) bool {
+	switch statusCode {
+	case http.StatusTooManyRequests,       // 429 rate limit
+		http.StatusInternalServerError,    // 500
+		http.StatusBadGateway,             // 502
+		http.StatusServiceUnavailable,     // 503
+		http.StatusGatewayTimeout:         // 504
+		return true
+	}
+	return false
+}
+
+// post sends a JSON payload to the completions endpoint, retrying on transient
+// errors up to maxRetries times with exponential backoff (1s, 2s, 4s).
 func (c *OpenAIClient) post(ctx context.Context, payload oaiRequest) (*http.Response, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.baseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
+
+	const maxRetries = 3
+	backoff := time.Second
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			c.baseURL+"/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if c.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		}
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			// Network-level error: retry unless context is done.
+			if ctx.Err() != nil {
+				return nil, err
+			}
+			if attempt < maxRetries {
+				fmt.Fprintf(os.Stderr, "⚠  llm request failed (%v), retrying in %s (%d/%d)…\n",
+					err, backoff, attempt, maxRetries)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(backoff):
+				}
+				backoff *= 2
+				continue
+			}
+			return nil, err
+		}
+
+		if isRetryable(resp.StatusCode) && attempt < maxRetries {
+			resp.Body.Close()
+			fmt.Fprintf(os.Stderr, "⚠  llm HTTP %d, retrying in %s (%d/%d)…\n",
+				resp.StatusCode, backoff, attempt, maxRetries)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+			continue
+		}
+
+		return resp, nil
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-	return c.http.Do(req)
+	return nil, fmt.Errorf("request failed after %d attempts", maxRetries)
 }
 
 // Complete sends a non-streaming request.

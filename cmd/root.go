@@ -132,6 +132,7 @@ func Execute() {
 	reg.Register(tools.NewEditTool())
 	reg.Register(bashTool)
 	reg.Register(tools.NewGrepTool())
+	reg.Register(tools.NewFindTool())
 
 	// Resolve loop timeout from config.
 	// LoopTimeoutMin: 0 = default (30 min), negative = no limit.
