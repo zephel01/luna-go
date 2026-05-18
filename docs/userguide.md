@@ -16,9 +16,10 @@
 8. [スキル（Agent Skills）](#8-スキルagent-skills)
 9. [自律実行モード（/goal）](#9-自律実行モードgoal)
 10. [コンテキスト自動圧縮](#10-コンテキスト自動圧縮)
-11. [クラウド API を使う](#11-クラウド-api-を使う)
-12. [CodeRouter と組み合わせる](#12-coderouter-と組み合わせる)
-13. [トラブルシューティング](#13-トラブルシューティング)
+11. [Docker サンドボックス](#11-docker-サンドボックス)
+12. [クラウド API を使う](#12-クラウド-api-を使う)
+13. [CodeRouter と組み合わせる](#13-coderouter-と組み合わせる)
+14. [トラブルシューティング](#14-トラブルシューティング)
 
 ---
 
@@ -523,7 +524,82 @@ compress_model: qwen2.5:1.5b
 
 ---
 
-## 11. クラウド API を使う
+## 11. Docker サンドボックス
+
+`--sandbox` フラグを使うと、bash コマンドがホスト環境ではなく Docker コンテナ内で実行されます。
+
+### なぜ使うか
+
+- **実環境への影響をゼロに** — コンテナ内の操作はホストに影響しない（書き込みは `/workspace` マウント経由のみ）
+- **再現性** — イメージを固定すれば誰の環境でも同じ結果になる
+- **セキュリティ** — ネットワーク遮断（`--network none`）でコード実行を隔離
+
+### 基本的な使い方
+
+```bash
+# デフォルト（ubuntu:22.04）
+luna --sandbox "依存をインストールしてテストを実行して"
+
+# カスタムイメージ指定
+luna --sandbox --sandbox-image python:3.12 "requirements.txt のパッケージを入れてテストを実行"
+```
+
+起動時に確認メッセージが表示されます：
+
+```
+🐳 sandbox mode: ubuntu:22.04  network=none  memory=256m  cpus=0.5
+```
+
+bash ツールが呼ばれるとコンテナが起動します：
+
+```
+🐳 starting container (ubuntu:22.04)...
+```
+
+### config.yaml で設定する
+
+```yaml
+# ~/.luna-go/config.yaml
+sandbox:
+  enabled: true
+  image: "ubuntu:22.04"
+  network: "none"    # none | bridge | host
+  memory: "256m"
+  cpus: "0.5"
+```
+
+### カスタムイメージのビルド
+
+`scripts/sandbox/Dockerfile`（python3・Node.js 20・uv・ripgrep 入り）を使って、よく使うツールが揃ったイメージをあらかじめビルドできます：
+
+```bash
+# イメージをビルド
+make sandbox-build   # → luna-sandbox:latest
+
+# テストを実行
+make test-sandbox         # Docker ビルドからフルテスト
+make test-sandbox-quick   # ビルド済みイメージで高速テスト
+```
+
+### ファイルのアクセス
+
+| 操作 | 挙動 |
+|------|------|
+| コンテナ内から `/workspace` に書く | ホスト側 cwd にも反映される |
+| コンテナ内から `/workspace` 以外を読む | コンテナ自身の FS（ホストとは独立） |
+| ホスト側からファイルを見る | コンテナ停止後も `/workspace` の変更は残る |
+
+### Docker が未インストールの場合
+
+Docker がない環境では警告を出し、通常モード（ホスト bash）で動作します：
+
+```
+⚠  docker not found — sandbox disabled, running on host
+```
+
+---
+
+## 12. クラウド API を使う
 
 Luna は OpenAI 互換 API であればどれでも使えます。
 
@@ -550,7 +626,7 @@ base_url: https://api.openai.com/v1
 
 ---
 
-## 12. CodeRouter と組み合わせる
+## 13. CodeRouter と組み合わせる
 
 [CodeRouter](https://github.com/zephel01/CodeRouter) は、ローカル LLM とクラウド API の間に置くルーター層です。luna-go は OpenAI 互換 API をそのまま使っているため、`--base-url` を変えるだけで接続できます。
 
@@ -654,7 +730,7 @@ luna --base-url http://localhost:8088/v1 --model qwen2.5-coder:7b "hello"
 
 ---
 
-## 13. トラブルシューティング
+## 14. トラブルシューティング
 
 ### Ollama に接続できない
 

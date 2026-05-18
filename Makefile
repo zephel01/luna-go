@@ -1,4 +1,4 @@
-.PHONY: build test vet lint clean install
+.PHONY: build test vet lint clean install sandbox-build test-sandbox
 
 BINARY  := luna
 VERSION := $(shell grep 'const version' cmd/root.go | grep -o '"[^"]*"' | tr -d '"')
@@ -31,6 +31,18 @@ clean:
 ## version: print current version
 version:
 	@echo "luna-go v$(VERSION)"
+
+## sandbox-build: build the luna-sandbox Docker image
+sandbox-build:
+	docker build -t luna-sandbox:latest -f scripts/sandbox/Dockerfile scripts/sandbox/
+
+## test-sandbox: run sandbox integration tests (requires Docker)
+test-sandbox:
+	bash scripts/test-sandbox.sh
+
+## test-sandbox-quick: run sandbox tests, skip Docker build and luna LLM test
+test-sandbox-quick:
+	SKIP_BUILD=1 SKIP_LUNA_TEST=1 bash scripts/test-sandbox.sh
 
 ## help: show this message
 help:
