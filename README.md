@@ -40,6 +40,7 @@ All tests pass. Refactored Parse to use a switch statement.
 | REPL readline | ✅ liner | ✅ | ✅ | ❌ |
 | 自律ループ | ✅ `/goal` | ✅ | ❌ | ❌ |
 | Agent Skills | ✅ | ✅ | ❌ | ❌ |
+| Docker サンドボックス | ✅ `--sandbox` | ✅ | ❌ | ❌ |
 
 > モデルが賢ければ、ツールは 5 つで十分。
 
@@ -147,6 +148,8 @@ luna config <show|init>
 | `--unsafe` | bash / write の確認をスキップ | `false` |
 | `--stream` | ストリーミング出力 | `false` |
 | `--no-context` | `.luna-context.md` の読み込みをスキップ | `false` |
+| `--sandbox` | bash コマンドを Docker コンテナ内で実行 | `false` |
+| `--sandbox-image` | sandbox で使う Docker イメージ | `ubuntu:22.04` |
 
 ### REPL コマンド
 
@@ -168,6 +171,50 @@ luna config <show|init>
 ```bash
 luna --provider openai --model gpt-4o "add error handling to all HTTP handlers"
 ```
+
+---
+
+## Docker サンドボックス
+
+`--sandbox` フラグを付けると、bash コマンドがホスト環境ではなく Docker コンテナ内で実行されます。
+
+```bash
+# デフォルトイメージ（ubuntu:22.04）
+luna --sandbox "依存をインストールしてテストを実行して"
+
+# 専用開発イメージを使う
+luna --sandbox --sandbox-image luna-sandbox:latest "python で hello world を書いて実行して"
+```
+
+起動時に設定を確認するメッセージが出ます：
+
+```
+🐳 sandbox mode: ubuntu:22.04  network=none  memory=256m  cpus=0.5
+```
+
+bash ツールが呼ばれた瞬間にコンテナが起動し、ホストの作業ディレクトリが `/workspace` としてマウントされます。ファイルの読み書きはホスト側にも反映されます。
+
+**config.yaml で設定する場合：**
+
+```yaml
+sandbox:
+  enabled: true
+  image: "ubuntu:22.04"
+  network: "none"    # none | bridge | host
+  memory: "256m"
+  cpus: "0.5"
+```
+
+**カスタムイメージのビルド：**
+
+`scripts/sandbox/Dockerfile`（python3・Node.js 20・uv・ripgrep 入り）を使って独自イメージを作れます：
+
+```bash
+make sandbox-build          # luna-sandbox:latest をビルド
+make test-sandbox           # sandbox の動作テストを実行
+```
+
+> Docker が未インストールの場合は警告を出して通常モードで動作します。
 
 ---
 
@@ -274,6 +321,8 @@ Luna は [ReAct](https://arxiv.org/abs/2210.03629) ループで動作します�
 - [x] v0.5 — 自動コンテキスト圧縮（`compress_threshold` + `compress_model`）
 - [x] v0.6 — compaction ファイルリスト引き継ぎ、自動リトライ、`find` ツール追加（6 本目）
 - [x] v0.7 — `ls` ツール（7 本目）、persistent bash shell（env/cd 維持）、`/tree` セッション履歴表示
+- [x] v0.8 — `edit` 複数編集（`edits[]`）、イテレーティブ compaction、スプリットターン、プロンプトテンプレート
+- [x] v0.9 — Docker サンドボックス（`--sandbox` / `--sandbox-image`）、`scripts/test-sandbox.sh`
 - [ ] v1.0 — バイナリ自動配布、`ollama launch luna`、安定 API
 
 ---

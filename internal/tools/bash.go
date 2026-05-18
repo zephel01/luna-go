@@ -20,8 +20,11 @@ const (
 // Environment variables and the current directory are preserved across calls
 // within the same session.
 // When unsafe=false (default), the user is prompted to confirm each command.
+// When sandbox options are set (via SetSandbox), commands run inside a Docker
+// container instead of the host shell for stronger isolation.
 type BashTool struct {
 	unsafe  bool
+	sandbox SandboxOptions
 	confirm func(prompt string) bool // nil = built-in bufio fallback
 
 	shellOnce sync.Once
@@ -30,6 +33,10 @@ type BashTool struct {
 }
 
 func NewBashTool(unsafe bool) *BashTool { return &BashTool{unsafe: unsafe} }
+
+// SetSandbox configures Docker-based isolation for bash commands.
+// Must be called before the first Execute call (before the shell is started).
+func (t *BashTool) SetSandbox(opts SandboxOptions) { t.sandbox = opts }
 
 // SetConfirm overrides the built-in stdin confirmation with a custom function.
 func (t *BashTool) SetConfirm(fn func(prompt string) bool) { t.confirm = fn }
@@ -44,11 +51,11 @@ func (t *BashTool) Close() {
 
 func (t *BashTool) getShell() (*persistentShell, error) {
 	t.shellOnce.Do(func() {
-		t.shell, t.shellErr = newPersistentShell()
+		t.shell, t.shellErr = newPersistentShell(t.sandbox)
 	})
-	// If the shell died between calls, try restarting.
+	// If the shell died between calls, try restarting with the same config.
 	if t.shellErr == nil && !t.shell.alive() {
-		t.shell, t.shellErr = newPersistentShell()
+		t.shell, t.shellErr = newPersistentShell(t.sandbox)
 	}
 	return t.shell, t.shellErr
 }
@@ -56,9 +63,13 @@ func (t *BashTool) getShell() (*persistentShell, error) {
 func (t *BashTool) Name() string { return "bash" }
 
 func (t *BashTool) Description() string {
-	return "Execute a shell command in a persistent bash session. " +
+	base := "Execute a shell command in a persistent bash session. " +
 		"Environment variables and working directory (cd) are preserved across calls. " +
 		"30s timeout per command, 10KB output limit."
+	if t.sandbox.Enabled {
+		return base + " Running inside Docker sandbox (" + t.sandbox.Image + ")."
+	}
+	return base
 }
 
 func (t *BashTool) InputSchema() map[string]any {

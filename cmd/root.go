@@ -23,19 +23,21 @@ import (
 	"github.com/zephel01/luna-go/internal/tools"
 )
 
-const version = "0.8.0"
+const version = "0.9.0"
 
 // Execute is the main entrypoint called from main.go.
 func Execute() {
-	model     := flag.String("model", "", "LLM model (default: qwen2.5-coder:7b)")
-	provider  := flag.String("provider", "", "Provider: ollama | openai (default: ollama)")
-	baseURL   := flag.String("base-url", "", "API base URL (default: http://localhost:11434)")
-	apiKey    := flag.String("api-key", "", "API key (default: $OPENAI_API_KEY)")
-	maxIter   := flag.Int("max-iter", 0, "Max tool iterations (default: 20)")
-	unsafe    := flag.Bool("unsafe", false, "Skip confirmation for bash and write")
-	stream    := flag.Bool("stream", false, "Enable streaming output (experimental)")
-	noContext := flag.Bool("no-context", false, "Skip loading .luna-context.md")
-	ver       := flag.Bool("version", false, "Print version and exit")
+	model        := flag.String("model", "", "LLM model (default: qwen2.5-coder:7b)")
+	provider     := flag.String("provider", "", "Provider: ollama | openai (default: ollama)")
+	baseURL      := flag.String("base-url", "", "API base URL (default: http://localhost:11434)")
+	apiKey       := flag.String("api-key", "", "API key (default: $OPENAI_API_KEY)")
+	maxIter      := flag.Int("max-iter", 0, "Max tool iterations (default: 20)")
+	unsafe       := flag.Bool("unsafe", false, "Skip confirmation for bash and write")
+	stream       := flag.Bool("stream", false, "Enable streaming output (experimental)")
+	noContext    := flag.Bool("no-context", false, "Skip loading .luna-context.md")
+	sandbox      := flag.Bool("sandbox", false, "Run bash commands inside a Docker container")
+	sandboxImage := flag.String("sandbox-image", "", "Docker image for sandbox (default: ubuntu:22.04)")
+	ver          := flag.Bool("version", false, "Print version and exit")
 
 	flag.BoolVar(ver, "v", false, "Print version and exit (shorthand)")
 	flag.Usage = func() {
@@ -84,13 +86,15 @@ func Execute() {
 	}
 
 	// CLI flags take priority over config file.
-	if *model != ""    { cfg.Model = *model }
-	if *provider != "" { cfg.Provider = *provider }
-	if *baseURL != ""  { cfg.BaseURL = *baseURL }
-	if *apiKey != ""   { cfg.APIKey = *apiKey }
-	if *maxIter != 0   { cfg.MaxIter = *maxIter }
-	if *unsafe         { cfg.Unsafe = true }
-	if *stream         { cfg.Stream = true }
+	if *model != ""       { cfg.Model = *model }
+	if *provider != ""    { cfg.Provider = *provider }
+	if *baseURL != ""     { cfg.BaseURL = *baseURL }
+	if *apiKey != ""      { cfg.APIKey = *apiKey }
+	if *maxIter != 0      { cfg.MaxIter = *maxIter }
+	if *unsafe            { cfg.Unsafe = true }
+	if *stream            { cfg.Stream = true }
+	if *sandbox           { cfg.Sandbox.Enabled = true }
+	if *sandboxImage != "" { cfg.Sandbox.Image = *sandboxImage }
 
 	// Environment variables fill gaps not already set by flags.
 	if v := os.Getenv("LUNA_MODEL"); v != "" && *model == ""       { cfg.Model = v }
@@ -138,6 +142,18 @@ func Execute() {
 	// Build tool registry. Keep references to tools that need confirm injection.
 	bashTool  := tools.NewBashTool(cfg.Unsafe)
 	defer bashTool.Close() // shut down the persistent shell on exit
+	if cfg.Sandbox.Enabled {
+		opts := tools.SandboxOptions{
+			Enabled: true,
+			Image:   cfg.Sandbox.Image,
+			Network: cfg.Sandbox.Network,
+			Memory:  cfg.Sandbox.Memory,
+			CPUs:    cfg.Sandbox.CPUs,
+		}
+		bashTool.SetSandbox(opts)
+		fmt.Fprintf(os.Stderr, "🐳 sandbox mode: %s  network=%s  memory=%s  cpus=%s\n",
+			opts.Image, opts.Network, opts.Memory, opts.CPUs)
+	}
 	writeTool := tools.NewWriteTool(cfg.Unsafe)
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewReadTool())

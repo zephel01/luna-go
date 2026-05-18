@@ -4,24 +4,39 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
 )
 
+// SandboxOptions controls Docker-based isolation for the persistent shell.
+// When Enabled is true bash commands run inside a Docker container.
+// If Docker is unavailable a warning is printed and execution falls back to
+// the host shell so luna remains usable on machines without Docker.
+type SandboxOptions struct {
+	Enabled bool
+	Image   string // e.g. "ubuntu:22.04"
+	Network string // "none" | "bridge" | "host"
+	Memory  string // Docker memory limit, e.g. "256m"
+	CPUs    string // fractional CPU quota, e.g. "0.5"
+}
+
 // persistentShell maintains a single bash process for the lifetime of a session.
 // Commands are sent via stdin; output is read until a unique sentinel line appears.
 // If the shell process dies unexpectedly it is restarted on the next Execute call.
+// When sandbox.Enabled is true the shell runs inside a Docker container.
 type persistentShell struct {
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  *bufio.Reader
+	sandbox SandboxOptions // retained for restarts after process death
 }
 
-func newPersistentShell() (*persistentShell, error) {
-	s := &persistentShell{}
+func newPersistentShell(sandbox SandboxOptions) (*persistentShell, error) {
+	s := &persistentShell{sandbox: sandbox}
 	if err := s.start(); err != nil {
 		return nil, err
 	}
@@ -29,8 +44,55 @@ func newPersistentShell() (*persistentShell, error) {
 }
 
 func (s *persistentShell) start() error {
-	cmd := exec.Command("bash", "--norc", "--noprofile")
-	cmd.Env = cmd.Environ() // inherit environment
+	var cmd *exec.Cmd
+
+	if s.sandbox.Enabled {
+		// Resolve defaults for any unset fields.
+		image := s.sandbox.Image
+		if image == "" {
+			image = "ubuntu:22.04"
+		}
+		network := s.sandbox.Network
+		if network == "" {
+			network = "none"
+		}
+		memory := s.sandbox.Memory
+		if memory == "" {
+			memory = "256m"
+		}
+		cpus := s.sandbox.CPUs
+		if cpus == "" {
+			cpus = "0.5"
+		}
+
+		// Fall back gracefully when Docker is not installed.
+		if _, err := exec.LookPath("docker"); err != nil {
+			fmt.Fprintln(os.Stderr, "⚠  docker not found — sandbox disabled, running on host")
+			s.sandbox.Enabled = false
+			cmd = exec.Command("bash", "--norc", "--noprofile")
+			cmd.Env = cmd.Environ()
+		} else {
+			workdir, err := os.Getwd()
+			if err != nil {
+				workdir = "."
+			}
+			args := []string{
+				"run", "--rm", "-i",
+				"--network", network,
+				"--memory", memory,
+				"--cpus", cpus,
+				"-v", workdir + ":/workspace",
+				"-w", "/workspace",
+				image,
+				"bash", "--norc", "--noprofile",
+			}
+			cmd = exec.Command("docker", args...)
+			fmt.Fprintf(os.Stderr, "🐳 starting container (%s)...\n", image)
+		}
+	} else {
+		cmd = exec.Command("bash", "--norc", "--noprofile")
+		cmd.Env = cmd.Environ() // inherit environment
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

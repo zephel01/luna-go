@@ -8,6 +8,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SandboxConfig controls optional Docker-based isolation for bash execution.
+// When Enabled is true, bash commands run inside a Docker container instead of
+// the host shell.  Docker must be installed and running on the host.
+// If Docker is unavailable at runtime, luna falls back to unsandboxed execution
+// with a warning rather than exiting.
+type SandboxConfig struct {
+	// Enabled switches on Docker sandboxing.  Can also be set via --sandbox flag.
+	Enabled bool `yaml:"enabled"`
+	// Image is the Docker image used for the container (e.g. "ubuntu:22.04").
+	Image string `yaml:"image"`
+	// Network is the Docker network mode ("none", "bridge", "host").
+	// "none" (default) disables network access from within the sandbox.
+	Network string `yaml:"network"`
+	// Memory is the container memory limit accepted by Docker (e.g. "256m", "1g").
+	Memory string `yaml:"memory"`
+	// CPUs is the fractional CPU quota (e.g. "0.5" = half a core).
+	CPUs string `yaml:"cpus"`
+}
+
 // Config holds all runtime configuration for luna.
 type Config struct {
 	Model      string `yaml:"model"`
@@ -32,6 +51,9 @@ type Config struct {
 	// CompressThreshold is the estimated token count at which context compression
 	// triggers. 0 (default) = disabled. Set to e.g. 24000 to enable.
 	CompressThreshold int `yaml:"compress_threshold"`
+	// Sandbox controls Docker-based isolation for bash commands.
+	// Disabled by default; opt in via config.yaml or --sandbox flag.
+	Sandbox SandboxConfig `yaml:"sandbox"`
 }
 
 func defaults() Config {
@@ -43,6 +65,12 @@ func defaults() Config {
 		Stream:   false, // non-streaming by default for reliable tool_calls parsing
 		// NumCtx / NumPredict: 0 → auto (applied by OpenAIClient for Ollama endpoints)
 		// LoopTimeoutMin: 0 → default (30 min)
+		Sandbox: SandboxConfig{
+			Image:   "ubuntu:22.04",
+			Network: "none",
+			Memory:  "256m",
+			CPUs:    "0.5",
+		},
 	}
 }
 
