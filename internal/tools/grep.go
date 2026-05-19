@@ -13,6 +13,7 @@ const maxGrepLines = 200
 // GrepTool searches files for a pattern using the system grep.
 type GrepTool struct{}
 
+// NewGrepTool returns a new GrepTool ready for use.
 func NewGrepTool() *GrepTool { return &GrepTool{} }
 
 func (t *GrepTool) Name() string { return "grep" }
@@ -42,6 +43,9 @@ func (t *GrepTool) InputSchema() map[string]any {
 	}
 }
 
+// Execute runs a grep search and returns matching lines with file path and line number.
+// Returns "no matches found" (not an error) when the pattern produces no results.
+// Output is capped at maxGrepLines to prevent flooding the LLM context window.
 func (t *GrepTool) Execute(_ context.Context, input json.RawMessage) (string, error) {
 	var args struct {
 		Pattern   string `json:"pattern"`

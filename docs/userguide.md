@@ -333,25 +333,41 @@ Go 1.24 製の CLI ツール。パッケージ構成: cmd/, internal/llm/, inter
 
 1. `cwd/.luna-context.md`（プロジェクト固有）
 2. `~/.luna-go/memory/<project>/context.md`（`luna dream` が生成）
-3. `~/.luna-go/context.md`（グローバルフォールバック）
+3. `~/.luna-go/memory/<project>/experience.md`（`luna dream` が生成・暗黙知）
+4. `~/.luna-go/context.md`（グローバルフォールバック）
 
-1 と 2 は両方存在する場合に結合されます。
+1〜3 は全て存在する場合に結合されます。グローバルフォールバックは 1〜3 が全てない場合のみ使用されます。
 
 ---
 
 ## 7. 記憶機能（Dreaming-lite）
 
-Luna はセッション中の会話を自動的にバッファに保存します。`luna dream` を実行すると、ローカル Ollama がバッファを要約して `context.md` に蒸留します。翌日の起動時にこの記憶が自動で注入されます。
+Luna はセッション中の会話を自動的にバッファに保存します。`luna dream` を実行すると、ローカル Ollama がバッファを 3 種類のファイルに蒸留します。翌日の起動時にこれらの記憶が自動で注入されます。
+
+### Dream が生成する 3 種類のファイル
+
+| ファイル | 内容 | 用途 |
+|----------|------|------|
+| `context.md` | プロジェクト固有の技術決定・構造・ルール | システムプロンプトに注入 |
+| `experience.md` | 暗黙知・パターン・「秘伝のタレ」 | システムプロンプトに注入 |
+| `skills/<name>/SKILL.md` | 再利用可能な手順（`scope: project` or `global`） | スキルとして自動認識 |
 
 ### ファイル構成
 
 ```
 ~/.luna-go/
   config.yaml
+  skills/                       ← global スコープスキルの書き出し先
+    <skill-name>/
+      SKILL.md
   memory/
     <project-name>/
-      context.md      ← 蒸留済みの記憶（起動時に自動 inject）
+      context.md      ← プロジェクト固有知識（起動時に自動 inject）
+      experience.md   ← 暗黙知・秘伝のタレ（起動時に自動 inject）
       buffer.jsonl    ← セッションバッファ（dream で消化される）
+      skills/         ← project スコープスキルの書き出し先
+        <skill-name>/
+          SKILL.md
   sessions/
     2026-05-17_10-30-00.jsonl   ← セッションログ（全会話の記録）
 ```
@@ -368,19 +384,31 @@ luna
 # 作業終了後
 luna dream
 # 🌙 dreaming over 3 buffer entries with qwen2.5-coder:7b ...
-# ✅ context.md updated (3 entries processed, buffer cleared)
+#    📝 context.md updated
+#    ✨ experience.md updated
+#    🔧 skill "go-http-timeout" saved (project)
+# ✅ dream complete (3 entries processed, buffer cleared)
 
 # 翌日
 luna
 # 🧠 loaded memory/context.md (luna-go)   ← 昨日の作業内容を把握した状態でスタート
+# ✨ loaded memory/experience.md (luna-go) ← 暗黙知も注入
+# 🔧 loaded 1 skill(s): go-http-timeout   ← 抽出されたスキルも自動認識
 ```
+
+### Dream のスキルスコープ
+
+Dream が生成するスキルには `scope` があります。
+
+- `scope: project`（デフォルト） — `~/.luna-go/memory/<project>/skills/` に保存。このプロジェクトでのみ使用されます。
+- `scope: global` — `~/.luna-go/skills/` に保存。全プロジェクトから使用されます。
 
 ### 記憶の確認・管理
 
 ```bash
 luna memory show    # context.md の内容を表示
-luna memory status  # バッファのエントリ数とサイズを表示
-luna memory clear   # バッファと context.md を削除してリセット
+luna memory status  # バッファ数・context/experience の行数・スキル数を表示
+luna memory clear   # バッファを削除してリセット
 ```
 
 ---
@@ -395,10 +423,11 @@ Luna は Agent Skills standard に対応しており、`SKILL.md` ファイル�
 
 ```
 <project>/.agents/skills/<name>/SKILL.md
+~/.luna-go/memory/<project>/skills/<name>/SKILL.md  ← luna dream が生成（project スコープ）
 ~/.agents/skills/<name>/SKILL.md
-~/.claude/skills/<name>/SKILL.md     ← Claude Code / Cowork と共有可能
+~/.claude/skills/<name>/SKILL.md                    ← Claude Code / Cowork と共有可能
 ~/.pi/agent/skills/<name>/SKILL.md
-~/.luna-go/skills/<name>/SKILL.md
+~/.luna-go/skills/<name>/SKILL.md                   ← luna dream が生成（global スコープ）
 ```
 
 ### SKILL.md の形式
@@ -854,13 +883,19 @@ llm.OpenAIClient.post calls http.Client.Do, which eventually calls tls.Conn.Writ
 ~/.luna-go/
   config.yaml               # グローバル設定
   context.md                # グローバルフォールバックコンテキスト
+  skills/                   # global スコープスキル（luna dream が生成、全プロジェクト共通）
+    <skill-name>/
+      SKILL.md
   memory/
     <project>/
-      context.md            # プロジェクト別・luna dream が生成
+      context.md            # プロジェクト固有知識（luna dream が生成）
+      experience.md         # 暗黙知・秘伝のタレ（luna dream が生成）
       buffer.jsonl          # セッションバッファ
+      skills/               # project スコープスキル（luna dream が生成）
+        <skill-name>/
+          SKILL.md
   sessions/
     YYYY-MM-DD_HH-MM-SS.jsonl  # セッションログ（全会話記録）
-  skills/                   # luna-go 固有スキルの置き場
 
 ~/.claude/skills/           # Claude Code / Cowork と共有できるスキル
 ~/.agents/skills/           # Agent Skills standard 準拠の場所

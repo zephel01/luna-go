@@ -13,6 +13,7 @@ import (
 // LsTool lists the contents of a directory.
 type LsTool struct{}
 
+// NewLsTool returns a new LsTool ready for use.
 func NewLsTool() *LsTool { return &LsTool{} }
 
 func (t *LsTool) Name() string { return "ls" }
@@ -35,6 +36,9 @@ func (t *LsTool) InputSchema() map[string]any {
 	}
 }
 
+// Execute lists the contents of a directory, sorted with directories first.
+// Each entry shows an icon (📁/📄), name, and human-readable file size.
+// Defaults to the current working directory when no path is provided.
 func (t *LsTool) Execute(_ context.Context, input json.RawMessage) (string, error) {
 	var args struct {
 		Path string `json:"path"`
