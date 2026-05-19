@@ -28,6 +28,7 @@ var defaultIgnoreDirs = map[string]bool{
 // FindTool searches for files matching a glob pattern within a directory.
 type FindTool struct{}
 
+// NewFindTool returns a new FindTool ready for use.
 func NewFindTool() *FindTool { return &FindTool{} }
 
 func (t *FindTool) Name() string { return "find" }
@@ -55,6 +56,9 @@ func (t *FindTool) InputSchema() map[string]any {
 	}
 }
 
+// Execute walks dir recursively and returns paths matching the glob pattern,
+// one per line. Common noise directories (.git, node_modules, vendor, etc.)
+// are skipped automatically. Results are capped at 500 entries.
 func (t *FindTool) Execute(_ context.Context, input json.RawMessage) (string, error) {
 	var args struct {
 		Pattern string `json:"pattern"`

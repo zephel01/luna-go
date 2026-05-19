@@ -1,3 +1,6 @@
+// Package llm defines the provider-agnostic LLM interface used by the Luna agent.
+// It abstracts over Ollama and OpenAI-compatible backends, exposing a unified
+// Client interface for both streaming and non-streaming completions.
 package llm
 
 import (

@@ -7,6 +7,8 @@
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Ollama](https://img.shields.io/badge/Ollama-first-blueviolet)](https://ollama.com)
+[![CI](https://github.com/zephel01/luna-go/actions/workflows/ci.yml/badge.svg)](https://github.com/zephel01/luna-go/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/zephel01/luna-go/branch/main/graph/badge.svg)](https://codecov.io/gh/zephel01/luna-go)
 
 [English](README.en.md) | 日本語
 
@@ -176,7 +178,7 @@ luna --provider openai --model gpt-4o "add error handling to all HTTP handlers"
 
 ## Docker サンドボックス
 
-`--sandbox` フラグを付けると、bash コマンドがホスト環境ではなく Docker コンテナ内で実行されます。
+`--sandbox` フラグを付けると、bash コマンドがホスト環境ではなく Docker コンテナ内で実行されます。生成された AI コードが**ホストファイルシステムやネットワークに直接触れない**ため、実験・学習用途や未知のコードを試すときに安全です。
 
 ```bash
 # デフォルトイメージ（ubuntu:22.04）
@@ -186,13 +188,24 @@ luna --sandbox "依存をインストールしてテストを実行して"
 luna --sandbox --sandbox-image luna-sandbox:latest "python で hello world を書いて実行して"
 ```
 
-起動時に設定を確認するメッセージが出ます：
+起動時に適用されたセキュリティ設定が表示されます：
 
 ```
 🐳 sandbox mode: ubuntu:22.04  network=none  memory=256m  cpus=0.5
 ```
 
-bash ツールが呼ばれた瞬間にコンテナが起動し、ホストの作業ディレクトリが `/workspace` としてマウントされます。ファイルの読み書きはホスト側にも反映されます。
+### セキュリティ境界
+
+デフォルトで以下の制限が適用されます：
+
+| 制限 | 値 | 効果 |
+|------|-----|------|
+| ネットワーク | `none` | コンテナからの外部通信をブロック |
+| メモリ | `256m` | ホストのメモリを使い切られない |
+| CPU | `0.5` | ホストの CPU を圧迫しない |
+| ファイル書き込み | `/workspace` マウントのみ | cwd 以外のホストファイルに触れられない |
+
+ホストの作業ディレクトリは `/workspace` としてコンテナにマウントされます。ファイルの読み書きはこのマウント経由でホスト側に反映されますが、それ以外のパスへのアクセスはコンテナ内に閉じています。
 
 **config.yaml で設定する場合：**
 
@@ -214,7 +227,7 @@ make sandbox-build          # luna-sandbox:latest をビルド
 make test-sandbox           # sandbox の動作テストを実行
 ```
 
-> Docker が未インストールの場合は警告を出して通常モードで動作します。
+> Docker が未インストールの場合は警告を出して通常モードにフォールバックします。
 
 ---
 
@@ -234,27 +247,38 @@ Luna はプロジェクトディレクトリに `.luna-context.md` があれば�
 
 ## Dreaming-lite（セッション記憶）
 
-Claude Dreaming にインスパイアされた、ローカル Ollama で動く記憶機能です。
+Claude Dreaming にインスパイアされた、ローカル Ollama で動く記憶機能です。`luna dream` を実行すると、バッファを **3 種類のファイル** に蒸留します。
 
 ```
 # 1日の作業後
 $ luna dream
 🌙 dreaming over 5 buffer entries with qwen3.5:9b ...
-✅ context.md updated (5 entries processed, buffer cleared)
+   📝 context.md updated
+   ✨ experience.md updated
+   🔧 skill "go-http-timeout" saved (project)
+✅ dream complete (5 entries processed, buffer cleared)
 
 # 翌日の起動時
 $ luna
 📎 loaded .luna-context.md
-🧠 loaded memory/context.md (luna-go)   ← 昨日の内容を把握した状態でスタート
+🧠 loaded memory/context.md (luna-go)    ← プロジェクト固有知識
+✨ loaded memory/experience.md (luna-go) ← 暗黙知・秘伝のタレ
+🔧 loaded 1 skill(s): go-http-timeout   ← 抽出されたスキルも自動認識
 >
 ```
 
-セッション中の会話は `~/.luna-go/memory/<project>/buffer.jsonl` に自動保存されます。`luna dream` を実行すると Ollama が内容を要約し、`context.md` に蒸留します。
+| ファイル | 内容 |
+|----------|------|
+| `context.md` | プロジェクト固有の技術決定・ルール |
+| `experience.md` | 暗黙知・パターン・「秘伝のタレ」 |
+| `skills/<name>/SKILL.md` | 再利用可能な手順（`scope: project` or `global`） |
 
 ```
 ~/.luna-go/memory/<project>/
-  context.md     ← 蒸留された記憶（自動 inject）
-  buffer.jsonl   ← セッションバッファ（dream で消化）
+  context.md       ← プロジェクト固有知識（自動 inject）
+  experience.md    ← 暗黙知（自動 inject）
+  buffer.jsonl     ← セッションバッファ（dream で消化）
+  skills/          ← project スコープスキルの書き出し先
 ```
 
 ---
@@ -323,6 +347,7 @@ Luna は [ReAct](https://arxiv.org/abs/2210.03629) ループで動作します�
 - [x] v0.7 — `ls` ツール（7 本目）、persistent bash shell（env/cd 維持）、`/tree` セッション履歴表示
 - [x] v0.8 — `edit` 複数編集（`edits[]`）、イテレーティブ compaction、スプリットターン、プロンプトテンプレート
 - [x] v0.9 — Docker サンドボックス（`--sandbox` / `--sandbox-image`）、`scripts/test-sandbox.sh`
+- [x] v0.9.x — Dream 3 分類出力（context / experience / skills）、project/global スコープ自動書き出し
 - [ ] v1.0 — バイナリ自動配布、`ollama launch luna`、安定 API
 
 ---

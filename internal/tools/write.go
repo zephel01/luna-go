@@ -17,6 +17,8 @@ type WriteTool struct {
 	confirm func(prompt string) bool // nil = built-in bufio fallback
 }
 
+// NewWriteTool returns a WriteTool. When unsafe is false (default), writing to an
+// existing file requires interactive confirmation before overwriting.
 func NewWriteTool(unsafe bool) *WriteTool { return &WriteTool{unsafe: unsafe} }
 
 // SetConfirm overrides the built-in stdin confirmation with a custom function.

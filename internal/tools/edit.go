@@ -29,6 +29,7 @@ type editEntry struct {
 // writing the file once — so edits must not depend on file state after a previous edit.
 type EditTool struct{}
 
+// NewEditTool returns a new EditTool ready for use.
 func NewEditTool() *EditTool { return &EditTool{} }
 
 func (t *EditTool) Name() string { return "edit" }

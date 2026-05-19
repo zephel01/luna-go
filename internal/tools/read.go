@@ -13,6 +13,7 @@ const maxReadLines = 2000
 // ReadTool reads a file and returns its contents with line numbers.
 type ReadTool struct{}
 
+// NewReadTool returns a new ReadTool ready for use.
 func NewReadTool() *ReadTool { return &ReadTool{} }
 
 func (t *ReadTool) Name() string { return "read" }
